@@ -31,19 +31,61 @@ export class DodaStrategy implements ScrapingStrategy {
 
         log(`Navigating to: ${searchUrl}`);
 
-        try {
-            await page.goto(searchUrl, { waitUntil: 'networkidle', timeout: 30000 });
+        // HTTP/2エラー対策: 複数回リトライ
+        let retries = 3;
+        let pageLoaded = false;
 
-            // 求人カードが表示されるまで待機
-            await page.waitForSelector('.jobCard-card', { timeout: 15000 }).catch(() => {
-                log('Warning: Job card selector not found, continuing anyway');
-            });
-            await page.waitForLoadState('networkidle');
-            await page.waitForTimeout(randomDelay(3000, 5000));
-        } catch (error) {
-            log(`Error loading search page: ${error}`);
-            return;
+        while (retries > 0 && !pageLoaded) {
+            try {
+                // ページ遷移前に追加ヘッダーを設定
+                await page.setExtraHTTPHeaders({
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache',
+                    'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+                    'Sec-Ch-Ua-Mobile': '?0',
+                    'Sec-Ch-Ua-Platform': '"Windows"',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                    'Upgrade-Insecure-Requests': '1',
+                });
+
+                // domcontentloadedで試行（networkidleより軽量）
+                await page.goto(searchUrl, {
+                    waitUntil: 'domcontentloaded',
+                    timeout: 30000
+                });
+
+                // 追加の待機
+                await page.waitForTimeout(randomDelay(2000, 4000));
+
+                // 求人カードが表示されるまで待機
+                await page.waitForSelector('.jobCard-card', { timeout: 15000 }).catch(() => {
+                    log('Warning: Job card selector not found, continuing anyway');
+                });
+
+                pageLoaded = true;
+                log('Page loaded successfully');
+
+            } catch (error: any) {
+                retries--;
+                log(`Error loading search page (${3 - retries}/3): ${error.message}`);
+
+                if (retries > 0) {
+                    log(`Retrying in 5 seconds...`);
+                    await page.waitForTimeout(5000);
+                } else {
+                    log(`All retries failed. Stopping.`);
+                    return;
+                }
+            }
         }
+
+        await page.waitForTimeout(randomDelay(2000, 3000));
 
         let hasNext = true;
         let pageNum = 0;
@@ -97,15 +139,20 @@ export class DodaStrategy implements ScrapingStrategy {
 
                     // 詳細ページに移動
                     await page.waitForTimeout(this.REQUEST_INTERVAL);
-                    await page.goto(fullUrl, { waitUntil: 'networkidle', timeout: 30000 });
-                    await page.waitForLoadState('networkidle');
-                    await page.waitForTimeout(randomDelay(2000, 4000));
+
+                    try {
+                        await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                        await page.waitForTimeout(randomDelay(3000, 5000));
+                    } catch (navError: any) {
+                        log(`Navigation error: ${navError.message}, skipping`);
+                        continue;
+                    }
 
                     // 404チェック
                     const is404 = await page.locator('text=/404|ページが見つかりません/i').count() > 0;
                     if (is404) {
                         log('404 page detected, skipping');
-                        await page.goBack({ waitUntil: 'networkidle' });
+                        await page.goBack({ waitUntil: 'domcontentloaded' });
                         continue;
                     }
 
@@ -164,24 +211,24 @@ export class DodaStrategy implements ScrapingStrategy {
                     };
 
                     // リストページに戻る
-                    await page.goBack({ waitUntil: 'networkidle' });
+                    await page.goBack({ waitUntil: 'domcontentloaded' });
                     await page.waitForTimeout(randomDelay(2000, 4000));
 
                     // 会社概要タブから戻った場合、さらに戻る必要がある場合
                     const currentUrl = page.url();
                     if (!currentUrl.includes('JobSearchList')) {
-                        await page.goBack({ waitUntil: 'networkidle' });
+                        await page.goBack({ waitUntil: 'domcontentloaded' });
                         await page.waitForTimeout(randomDelay(1000, 2000));
                     }
 
                 } catch (err) {
                     log(`Error scraping job: ${err}`);
                     try {
-                        await page.goBack({ waitUntil: 'networkidle' });
+                        await page.goBack({ waitUntil: 'domcontentloaded' });
                         await page.waitForTimeout(2000);
                     } catch {
                         log('Failed to go back, reloading search page');
-                        await page.goto(searchUrl, { waitUntil: 'networkidle' });
+                        await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
                         await page.waitForTimeout(3000);
                         break;
                     }
