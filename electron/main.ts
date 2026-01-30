@@ -1,7 +1,11 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
+import dotenv from 'dotenv';
 import { initDB, companyRepository } from './database';
 import { ScrapingEngine } from './scraping-engine';
+
+// Load environment variables from .env file
+dotenv.config();
 
 let mainWindow: BrowserWindow | null = null;
 let scrapingEngine: ScrapingEngine | null = null;
@@ -92,4 +96,66 @@ ipcMain.handle('scraper:stop', async () => {
         scrapingEngine = null;
     }
     return { success: true };
+});
+
+// Google Maps API Enrichment
+ipcMain.handle('enrich:startPhoneLookup', async () => {
+    try {
+        const { getGoogleMapsService } = await import('./services/GoogleMapsService');
+        const service = getGoogleMapsService();
+
+        if (!service) {
+            return { success: false, error: 'MAPS_API_KEY not configured. Please set it in .env file.' };
+        }
+
+        // 電話番号がない会社を取得
+        const companiesWithoutPhone = companyRepository.getAll({})
+            .filter(c => !c.phone);
+
+        if (companiesWithoutPhone.length === 0) {
+            return { success: true, message: 'All companies already have phone numbers', updated: 0 };
+        }
+
+        let updated = 0;
+        const total = companiesWithoutPhone.length;
+
+        for (let i = 0; i < companiesWithoutPhone.length; i++) {
+            const company = companiesWithoutPhone[i];
+
+            // Progress notification
+            mainWindow?.webContents.send('enrich:progress', {
+                current: i + 1,
+                total,
+                companyName: company.company_name,
+            });
+
+            const phone = await service.findCompanyPhone(company.company_name, company.address);
+
+            if (phone) {
+                companyRepository.update(company.id, { phone });
+                updated++;
+                mainWindow?.webContents.send('enrich:log', `Found phone for ${company.company_name}: ${phone}`);
+            } else {
+                mainWindow?.webContents.send('enrich:log', `No phone found for ${company.company_name}`);
+            }
+        }
+
+        return { success: true, updated, total };
+    } catch (error) {
+        console.error('Enrichment error:', error);
+        return { success: false, error: String(error) };
+    }
+});
+
+// Get companies without phone numbers count
+ipcMain.handle('enrich:getStats', async () => {
+    const allCompanies = companyRepository.getAll({});
+    const withPhone = allCompanies.filter(c => c.phone);
+    const withoutPhone = allCompanies.filter(c => !c.phone);
+
+    return {
+        total: allCompanies.length,
+        withPhone: withPhone.length,
+        withoutPhone: withoutPhone.length,
+    };
 });

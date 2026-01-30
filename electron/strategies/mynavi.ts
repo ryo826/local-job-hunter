@@ -266,27 +266,8 @@ export class MynaviStrategy implements ScrapingStrategy {
 
                     const cleanName = this.cleanCompanyName(companyName);
 
-                    // Step 2: 企業URLがある場合は連絡先情報を抽出
-                    let contactInfo: { phoneNumber?: string; email?: string; contactPageUrl?: string } = {};
-                    let finalScrapeStatus: 'pending' | 'step1_completed' | 'step2_completed' | 'failed' = 'step1_completed';
-
-                    if (companyUrl) {
-                        try {
-                            log(`Step 2: Extracting contact info from ${companyUrl}`);
-                            const { ContactExtractor } = await import('./contact-extractor');
-                            const extractor = new ContactExtractor();
-                            contactInfo = await extractor.extract(page, companyUrl, onLog);
-
-                            if (contactInfo.phoneNumber || contactInfo.email) {
-                                finalScrapeStatus = 'step2_completed';
-                                log(`Step 2 completed: phone=${contactInfo.phoneNumber}, email=${contactInfo.email}`);
-                            } else {
-                                log('Step 2: No contact info found');
-                            }
-                        } catch (error) {
-                            log(`Step 2 error: ${error}`);
-                        }
-                    }
+                    // Note: 電話番号はGoogle Maps APIで後から取得するため、Step 2はスキップ
+                    // スクレイピング速度が大幅に向上
 
                     yield {
                         source: this.source,
@@ -298,15 +279,13 @@ export class MynaviStrategy implements ScrapingStrategy {
                         establishment,
                         employees,
                         revenue,
-                        phone: contactInfo.phoneNumber || phone,
-                        email: contactInfo.email,
+                        phone: phone, // 求人ページのテーブルから取得できた場合のみ
                         address: normalizedAddress,
                         area: this.extractAreaFromAddress(normalizedAddress),
                         homepage_url: companyUrl,
-                        contact_page_url: contactInfo.contactPageUrl,
                         industry,
                         job_description: jobDescription,
-                        scrape_status: finalScrapeStatus,
+                        scrape_status: 'step1_completed',
                     };
 
                 } catch (err) {

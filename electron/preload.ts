@@ -47,6 +47,18 @@ export interface ScrapingOptions {
     location?: string;
 }
 
+export interface EnrichProgress {
+    current: number;
+    total: number;
+    companyName: string;
+}
+
+export interface EnrichStats {
+    total: number;
+    withPhone: number;
+    withoutPhone: number;
+}
+
 const electronAPI = {
     db: {
         getCompanies: (filters?: CompanyFilters): Promise<Company[]> =>
@@ -72,6 +84,24 @@ const electronAPI = {
         },
         offLog: () => {
             ipcRenderer.removeAllListeners('scraper:log');
+        },
+    },
+    enrich: {
+        startPhoneLookup: (): Promise<{ success: boolean; error?: string; updated?: number; total?: number }> =>
+            ipcRenderer.invoke('enrich:startPhoneLookup'),
+        getStats: (): Promise<EnrichStats> =>
+            ipcRenderer.invoke('enrich:getStats'),
+        onProgress: (callback: (progress: EnrichProgress) => void) => {
+            ipcRenderer.on('enrich:progress', (_event, progress) => callback(progress));
+        },
+        offProgress: () => {
+            ipcRenderer.removeAllListeners('enrich:progress');
+        },
+        onLog: (callback: (message: string) => void) => {
+            ipcRenderer.on('enrich:log', (_event, message) => callback(message));
+        },
+        offLog: () => {
+            ipcRenderer.removeAllListeners('enrich:log');
         },
     },
 };
