@@ -105,7 +105,7 @@ ipcMain.handle('enrich:startPhoneLookup', async () => {
         const service = getGoogleMapsService();
 
         if (!service) {
-            return { success: false, error: 'MAPS_API_KEY not configured. Please set it in .env file.' };
+            return { success: false, error: 'GOOGLE_MAPS_API_KEY not configured. Please set it in .env file.' };
         }
 
         // 電話番号がない会社を取得
