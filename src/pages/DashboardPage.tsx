@@ -19,7 +19,6 @@ export function DashboardPage() {
         mynavi: companies.filter((c) => c.source === 'mynavi').length,
         rikunabi: companies.filter((c) => c.source === 'rikunabi').length,
         doda: companies.filter((c) => c.source === 'doda').length,
-        green: companies.filter((c) => c.source === 'green').length,
     };
 
     const total = stats.totalCompanies || 1;
@@ -48,7 +47,6 @@ export function DashboardPage() {
                     <SourceRow name="マイナビ転職" count={sourceStats.mynavi} percentage={(sourceStats.mynavi / total) * 100} />
                     <SourceRow name="リクナビNEXT" count={sourceStats.rikunabi} percentage={(sourceStats.rikunabi / total) * 100} />
                     <SourceRow name="doda" count={sourceStats.doda} percentage={(sourceStats.doda / total) * 100} />
-                    <SourceRow name="Green" count={sourceStats.green} percentage={(sourceStats.green / total) * 100} />
                 </div>
             </Card>
 
