@@ -18,10 +18,12 @@ class RikunabiStrategy {
             else
                 console.log(`[Rikunabi] ${msg}`);
         };
-        // 検索結果ページURL構築 (正しいURL: /job_search/)
-        let searchUrl = 'https://next.rikunabi.com/job_search/';
+        // 検索結果ページURL構築
+        // リクナビNEXTはエリア指定URLを使用（全国 or 東京エリア）
+        let searchUrl = 'https://next.rikunabi.com/job_search/area-tokyo/';
         if (keywords) {
-            searchUrl += `?kw=${encodeURIComponent(keywords)}`;
+            // キーワード検索の場合
+            searchUrl = `https://next.rikunabi.com/job_search/area-tokyo/?kw=${encodeURIComponent(keywords)}`;
         }
         log(`Navigating to: ${searchUrl}`);
         // HTTP/2エラー対策: 複数回リトライ
