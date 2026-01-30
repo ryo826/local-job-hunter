@@ -18,8 +18,8 @@ class RikunabiStrategy {
             else
                 console.log(`[Rikunabi] ${msg}`);
         };
-        // 検索結果ページURL構築
-        let searchUrl = 'https://next.rikunabi.com/lst/';
+        // 検索結果ページURL構築 (正しいURL: /job_search/)
+        let searchUrl = 'https://next.rikunabi.com/job_search/';
         if (keywords) {
             searchUrl += `?kw=${encodeURIComponent(keywords)}`;
         }
