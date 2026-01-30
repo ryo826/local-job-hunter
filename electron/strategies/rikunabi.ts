@@ -37,6 +37,13 @@ export class RikunabiStrategy implements ScrapingStrategy {
 
         while (retries > 0 && !pageLoaded) {
             try {
+                // ステルス設定: webdriverフラグを削除
+                await page.addInitScript(() => {
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                    // Chrome DevTools Protocol検出回避
+                    (window as any).chrome = { runtime: {} };
+                });
+
                 await page.setExtraHTTPHeaders({
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
                     'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
@@ -51,21 +58,124 @@ export class RikunabiStrategy implements ScrapingStrategy {
                     'Upgrade-Insecure-Requests': '1',
                 });
 
-                await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                log('Navigating to search page...');
+                await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-                // Next.js SPAのため、ページが完全に読み込まれるまで待機
-                await page.waitForTimeout(randomDelay(5000, 8000));
+                // Next.js SPAのため、networkidleを待つ
+                log('Waiting for network to settle...');
+                try {
+                    await page.waitForLoadState('networkidle', { timeout: 30000 });
+                } catch {
+                    log('Network idle timeout, continuing...');
+                }
 
-                // スクロールしてコンテンツをトリガー
-                await page.evaluate(() => window.scrollTo(0, 500));
-                await page.waitForTimeout(2000);
-                await page.evaluate(() => window.scrollTo(0, 0));
-                await page.waitForTimeout(2000);
+                // 追加待機 - JSの実行完了を待つ
+                log('Waiting for JavaScript to execute...');
+                await page.waitForTimeout(5000);
 
-                // 求人カードまたはリスト要素が表示されるまで待機
-                await page.waitForSelector('[class*="detailArea"], [class*="cardHead"], [class*="employerName"], h2[class*="title"]', { timeout: 15000 }).catch(() => {
-                    log('Warning: Job card selector not found, continuing anyway');
+                // Cookie同意ボタンがあればクリック
+                const cookieSelectors = [
+                    'button:has-text("同意")',
+                    'button:has-text("OK")',
+                    'button:has-text("Accept")',
+                    '[class*="cookie"] button',
+                    '[id*="cookie"] button'
+                ];
+                for (const selector of cookieSelectors) {
+                    const cookieButton = page.locator(selector).first();
+                    if (await cookieButton.count() > 0 && await cookieButton.isVisible()) {
+                        log(`Found cookie consent button: ${selector}`);
+                        await cookieButton.click().catch(() => {});
+                        await page.waitForTimeout(1000);
+                        break;
+                    }
+                }
+
+                // モーダルを閉じる
+                const modalSelectors = [
+                    'button[aria-label="close"]',
+                    'button[aria-label="閉じる"]',
+                    '[class*="modal"] button[class*="close"]',
+                    '[class*="overlay"] button'
+                ];
+                for (const selector of modalSelectors) {
+                    const closeButton = page.locator(selector).first();
+                    if (await closeButton.count() > 0 && await closeButton.isVisible()) {
+                        log(`Found modal close button: ${selector}`);
+                        await closeButton.click().catch(() => {});
+                        await page.waitForTimeout(1000);
+                        break;
+                    }
+                }
+
+                // ページのURL確認
+                const currentUrl = page.url();
+                log(`Current URL: ${currentUrl}`);
+
+                // デバッグ: ページタイトルとHTML構造を確認
+                const pageTitle = await page.title();
+                log(`Page title: ${pageTitle}`);
+
+                // ページの状態を確認
+                const bodyContent = await page.evaluate(() => {
+                    const body = document.body;
+                    return {
+                        childCount: body.children.length,
+                        textLength: body.innerText.length,
+                        hasNextDiv: !!document.getElementById('__next'),
+                        nextDivChildren: document.getElementById('__next')?.children.length || 0
+                    };
                 });
+                log(`Page state: children=${bodyContent.childCount}, textLength=${bodyContent.textLength}, hasNext=${bodyContent.hasNextDiv}, nextChildren=${bodyContent.nextDivChildren}`);
+
+                // 段階的スクロールでlazy loadをトリガー
+                log('Triggering lazy load with scroll...');
+                await page.evaluate(async () => {
+                    for (let i = 0; i < 10; i++) {
+                        window.scrollTo(0, i * 300);
+                        await new Promise(r => setTimeout(r, 300));
+                    }
+                    window.scrollTo(0, 0);
+                });
+                await page.waitForTimeout(3000);
+
+                // 様々なセレクターで求人カードを探す
+                const cardSelectors = [
+                    '[class*="cardHead"]',
+                    '[class*="detailArea"]',
+                    '[class*="employerName"]',
+                    '[class*="jobCard"]',
+                    '[class*="JobCard"]',
+                    'article',
+                    '[data-testid*="job"]',
+                    'a[href*="/job/"]'
+                ];
+
+                let foundCards = false;
+                for (const selector of cardSelectors) {
+                    const count = await page.locator(selector).count();
+                    if (count > 0) {
+                        log(`Found ${count} elements with selector: ${selector}`);
+                        foundCards = true;
+                    }
+                }
+
+                if (!foundCards) {
+                    // 追加のデバッグ情報
+                    const allClasses = await page.evaluate(() => {
+                        const elements = document.querySelectorAll('*[class]');
+                        const classes = new Set<string>();
+                        elements.forEach(el => {
+                            el.className.split(' ').forEach(c => {
+                                if (c.includes('card') || c.includes('Card') || c.includes('job') || c.includes('Job') || c.includes('list') || c.includes('List')) {
+                                    classes.add(c);
+                                }
+                            });
+                        });
+                        return Array.from(classes).slice(0, 20);
+                    });
+                    log(`Relevant CSS classes found: ${allClasses.join(', ')}`);
+                }
 
                 pageLoaded = true;
                 log('Page loaded successfully');
@@ -94,36 +204,76 @@ export class RikunabiStrategy implements ScrapingStrategy {
             // スクロールしてコンテンツ読み込み
             await this.scrollToBottom(page, log);
 
-            // デバッグ: ページ上の主要な要素を確認
-            const bodyHTML = await page.evaluate(() => document.body.innerHTML.substring(0, 2000));
-            log(`Page HTML preview: ${bodyHTML.substring(0, 500)}...`);
+            // 求人カードを取得 - 複数の戦略を試行
+            let jobCards: any[] = [];
+            let cardType = '';
 
-            // 求人カードを取得 (複数のセレクターを試行)
-            // cardHeadを持つdiv要素を探す（HTMLで確認したクラス名）
-            let jobCards = await page.locator('[class*="cardHead"]').all();
-            log(`Selector [class*="cardHead"]: ${jobCards.length} cards`);
+            // 戦略1: 求人リンクを直接探す（最も確実）
+            const jobLinks = await page.locator('a[href*="/job/"]').all();
+            log(`Found ${jobLinks.length} job links`);
 
-            if (jobCards.length === 0) {
-                jobCards = await page.locator('[class*="detailArea"]').all();
-                log(`Selector [class*="detailArea"]: ${jobCards.length} cards`);
+            if (jobLinks.length > 0) {
+                // リンクをユニークなURLでフィルタリング
+                const seenUrls = new Set<string>();
+                for (const link of jobLinks) {
+                    const href = await link.getAttribute('href');
+                    if (href && !seenUrls.has(href)) {
+                        seenUrls.add(href);
+                        jobCards.push(link);
+                    }
+                }
+                cardType = 'job links';
+                log(`Unique job links: ${jobCards.length}`);
             }
 
+            // 戦略2: カードコンテナを探す
             if (jobCards.length === 0) {
-                // 会社名要素の親を探す
-                const employerNames = await page.locator('[class*="employerName"]').all();
-                log(`Found ${employerNames.length} employer name elements`);
-                if (employerNames.length > 0) {
-                    // 親の親を取得してカードとする
-                    jobCards = employerNames;
+                const cardSelectors = [
+                    '[class*="cardHead"]',
+                    '[class*="detailArea"]',
+                    '[class*="jobCard"]',
+                    '[class*="JobCard"]',
+                    'article[class*="card"]',
+                    '[class*="listItem"]',
+                    '[class*="ListItem"]'
+                ];
+
+                for (const selector of cardSelectors) {
+                    const cards = await page.locator(selector).all();
+                    if (cards.length > 0) {
+                        jobCards = cards;
+                        cardType = selector;
+                        log(`Found ${cards.length} cards with selector: ${selector}`);
+                        break;
+                    }
                 }
             }
 
+            // 戦略3: 会社名要素から親をたどる
             if (jobCards.length === 0) {
-                jobCards = await page.locator('[data-size="default"]').all();
-                log(`Selector [data-size="default"]: ${jobCards.length} cards`);
+                const employerNames = await page.locator('[class*="employerName"], [class*="companyName"]').all();
+                log(`Found ${employerNames.length} employer name elements`);
+                if (employerNames.length > 0) {
+                    jobCards = employerNames;
+                    cardType = 'employer names';
+                }
             }
 
-            log(`Found ${jobCards.length} job cards total`);
+            log(`Total job cards found: ${jobCards.length} (type: ${cardType})`);
+
+            // デバッグ: カードが見つからない場合、ページの状態を詳しく出力
+            if (jobCards.length === 0) {
+                const debugInfo = await page.evaluate(() => {
+                    const allLinks = Array.from(document.querySelectorAll('a')).map(a => a.href).filter(h => h.includes('rikunabi'));
+                    return {
+                        linkCount: allLinks.length,
+                        sampleLinks: allLinks.slice(0, 5),
+                        bodyText: document.body.innerText.substring(0, 500)
+                    };
+                });
+                log(`Debug - links: ${debugInfo.linkCount}, samples: ${debugInfo.sampleLinks.join(', ')}`);
+                log(`Debug - body text preview: ${debugInfo.bodyText.substring(0, 200)}...`);
+            }
 
             if (jobCards.length === 0) {
                 log('No job cards found, stopping');
@@ -132,77 +282,84 @@ export class RikunabiStrategy implements ScrapingStrategy {
 
             for (const card of jobCards) {
                 try {
-                    // カードまたは親要素から情報を取得
-                    const cardContainer = card.locator('..').locator('..'); // 親の親
-
-                    // 会社名を取得（直接またはカード内から）
-                    let companyName = (await card.textContent())?.trim() || '';
-                    if (!companyName || companyName.length > 100) {
-                        const companyNameEl = cardContainer.locator('[class*="employerName"], [class*="companyName"]').first();
-                        companyName = (await companyNameEl.textContent())?.trim() || '';
-                    }
-
-                    if (!companyName) {
-                        log('No company name found, skipping');
-                        continue;
-                    }
-
-                    // 職種を取得
-                    const jobTitleEl = cardContainer.locator('h2[class*="title"], [class*="heading"] h2').first();
-                    let jobTitle = (await jobTitleEl.textContent())?.trim() || '';
-                    if (!jobTitle) {
-                        const h2El = cardContainer.locator('h2').first();
-                        jobTitle = (await h2El.textContent())?.trim() || '';
-                    }
-
-                    // 勤務地を取得
-                    const locationEl = cardContainer.locator('p[data-content="location"], [data-icon="location"] + p, [class*="cardInfoText"]').first();
-                    const locationText = (await locationEl.textContent())?.trim() || '';
-
-                    // 給与を取得
-                    const salaryEl = cardContainer.locator('p[data-content="salary"], [data-icon="salary"] + p').first();
-                    const salaryText = (await salaryEl.textContent())?.trim() || '';
-
-                    log(`Found: ${companyName}`);
-
-                    // カードをクリックして詳細ページへ
-                    await page.waitForTimeout(this.REQUEST_INTERVAL);
-
-                    // カード内のリンクを探す
-                    let cardLink = cardContainer.locator('a[href*="/job/"]').first();
+                    // リンクベースの場合、直接URLを取得
                     let detailUrl = '';
+                    if (cardType === 'job links') {
+                        detailUrl = await card.getAttribute('href') || '';
+                    }
 
-                    if (await cardLink.count() > 0) {
-                        detailUrl = await cardLink.getAttribute('href') || '';
-                    } else {
-                        cardLink = cardContainer.locator('a').first();
-                        if (await cardLink.count() > 0) {
-                            detailUrl = await cardLink.getAttribute('href') || '';
+                    // カードコンテナを特定
+                    let cardContainer = card;
+                    if (cardType === 'job links' || cardType === 'employer names') {
+                        // 親要素をたどってカードコンテナを探す
+                        cardContainer = card.locator('xpath=ancestor::*[contains(@class, "card") or contains(@class, "Card") or contains(@class, "item") or contains(@class, "Item")][1]');
+                        if (await cardContainer.count() === 0) {
+                            cardContainer = card.locator('..').locator('..');
+                        }
+                    }
+
+                    // リンクURLを取得（まだ取得していない場合）
+                    if (!detailUrl) {
+                        const linkEl = cardContainer.locator('a[href*="/job/"]').first();
+                        if (await linkEl.count() > 0) {
+                            detailUrl = await linkEl.getAttribute('href') || '';
                         }
                     }
 
                     if (!detailUrl) {
-                        // カード全体がクリック可能な場合
-                        try {
-                            await cardContainer.click();
-                            await page.waitForTimeout(randomDelay(3000, 5000));
-                            detailUrl = page.url();
-                        } catch (clickError) {
-                            log(`Could not click card: ${clickError}`);
-                            continue;
-                        }
-                    } else {
-                        const fullUrl = detailUrl.startsWith('http') ? detailUrl : `https://next.rikunabi.com${detailUrl}`;
-                        log(`Visiting detail page: ${fullUrl}`);
+                        log('No detail URL found, skipping');
+                        continue;
+                    }
 
-                        try {
-                            await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                            await page.waitForTimeout(randomDelay(3000, 5000));
-                        } catch (navError: any) {
-                            log(`Navigation error: ${navError.message}, skipping`);
-                            continue;
+                    // 完全なURLに変換
+                    const fullUrl = detailUrl.startsWith('http') ? detailUrl : `https://next.rikunabi.com${detailUrl}`;
+                    log(`Visiting detail page: ${fullUrl}`);
+
+                    // レート制限
+                    await page.waitForTimeout(this.REQUEST_INTERVAL);
+
+                    // 詳細ページへ移動
+                    try {
+                        await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                        await page.waitForTimeout(randomDelay(3000, 5000));
+                    } catch (navError: any) {
+                        log(`Navigation error: ${navError.message}, skipping`);
+                        continue;
+                    }
+
+                    // 詳細ページから会社名を取得
+                    let companyName = '';
+                    const companySelectors = [
+                        'a[class*="linkTextCompany"]',
+                        'a[href*="/company/"]',
+                        '[class*="employerName"]',
+                        '[class*="companyName"]'
+                    ];
+                    for (const selector of companySelectors) {
+                        const el = page.locator(selector).first();
+                        if (await el.count() > 0) {
+                            companyName = (await el.textContent())?.trim() || '';
+                            if (companyName) break;
                         }
                     }
+
+                    if (!companyName) {
+                        log('No company name found on detail page, skipping');
+                        continue;
+                    }
+
+                    // 職種を取得
+                    let jobTitle = '';
+                    const titleSelectors = ['h1', 'h2[class*="title"]', '[class*="heading"] h2'];
+                    for (const selector of titleSelectors) {
+                        const el = page.locator(selector).first();
+                        if (await el.count() > 0) {
+                            jobTitle = (await el.textContent())?.trim() || '';
+                            if (jobTitle) break;
+                        }
+                    }
+
+                    log(`Found: ${companyName}`);
 
                     // 詳細ページから情報を抽出
 
@@ -229,8 +386,7 @@ export class RikunabiStrategy implements ScrapingStrategy {
                     // 企業情報を抽出
                     const address = await this.extractTextByLabel(page, '本社所在地') ||
                         await this.extractTextByLabel(page, '所在地') ||
-                        await this.extractTextByLabel(page, '勤務地') ||
-                        locationText;
+                        await this.extractTextByLabel(page, '勤務地');
                     const industry = await this.extractTextByLabel(page, '事業内容') ||
                         await this.extractTextByLabel(page, '業種');
                     const employees = await this.extractTextByLabel(page, '従業員数');
@@ -240,8 +396,7 @@ export class RikunabiStrategy implements ScrapingStrategy {
                     const phone = await this.extractTextByLabel(page, '企業代表番号') ||
                         await this.extractTextByLabel(page, '電話番号');
                     const detailSalary = await this.extractTextByLabel(page, '給与') ||
-                        await this.extractTextByLabel(page, '月給') ||
-                        salaryText;
+                        await this.extractTextByLabel(page, '月給');
 
                     // 企業HPを取得
                     const companyUrl = await this.extractCompanyUrl(page);
