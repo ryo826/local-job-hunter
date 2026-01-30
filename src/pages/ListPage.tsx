@@ -18,7 +18,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { ExternalLink, Eye, Phone, FileText, Search } from 'lucide-react';
+import { ExternalLink, Eye } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { ngWords } from '@/config/settings';
 import type { Company } from '@/types';
@@ -108,10 +108,6 @@ export function ListPage() {
         }
     };
 
-    const openGoogleSearch = (companyName: string) => {
-        window.open(`https://www.google.com/search?q=${encodeURIComponent(companyName)}`, '_blank');
-    };
-
     return (
         <div className="space-y-4 p-4">
             {/* Header */}
@@ -161,13 +157,14 @@ export function ListPage() {
                                     />
                                 </th>
                                 <th className="p-2 text-left font-medium w-[160px]">会社名</th>
+                                <th className="p-2 text-left font-medium w-[40px]">詳細</th>
+                                <th className="p-2 text-left font-medium w-[100px]">電話番号</th>
                                 <th className="p-2 text-left font-medium w-[100px]">業種</th>
+                                <th className="p-2 text-left font-medium w-[60px]">エリア</th>
                                 <th className="p-2 text-left font-medium w-[90px]">給与</th>
                                 <th className="p-2 text-left font-medium w-[70px]">規模</th>
-                                <th className="p-2 text-left font-medium w-[60px]">エリア</th>
                                 <th className="p-2 text-left font-medium w-[50px]">ソース</th>
                                 <th className="p-2 text-left font-medium w-[70px]">ステータス</th>
-                                <th className="p-2 text-left font-medium w-[90px]">アクション</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y">
@@ -204,6 +201,34 @@ export function ListPage() {
                                             </div>
                                         </td>
 
+                                        {/* 詳細ボタン */}
+                                        <td className="p-2">
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-6 w-6 p-0"
+                                                onClick={() => handleViewDetail(company)}
+                                                title="詳細"
+                                            >
+                                                <Eye className="h-3 w-3" />
+                                            </Button>
+                                        </td>
+
+                                        {/* 電話番号 */}
+                                        <td className="p-2">
+                                            {company.phone ? (
+                                                <span
+                                                    className="text-blue-600 cursor-pointer hover:underline truncate block max-w-[90px]"
+                                                    onClick={() => navigator.clipboard.writeText(company.phone!)}
+                                                    title={`${company.phone} (クリックでコピー)`}
+                                                >
+                                                    {company.phone}
+                                                </span>
+                                            ) : (
+                                                <span className="text-muted-foreground">-</span>
+                                            )}
+                                        </td>
+
                                         {/* 業種 */}
                                         <td className="p-2">
                                             <span
@@ -211,6 +236,13 @@ export function ListPage() {
                                                 title={formatted.fullIndustry}
                                             >
                                                 {formatted.industry}
+                                            </span>
+                                        </td>
+
+                                        {/* エリア */}
+                                        <td className="p-2">
+                                            <span className="text-muted-foreground truncate block max-w-[50px]">
+                                                {formatted.area}
                                             </span>
                                         </td>
 
@@ -231,13 +263,6 @@ export function ListPage() {
                                                 title={formatted.fullScale}
                                             >
                                                 {formatted.scale}
-                                            </span>
-                                        </td>
-
-                                        {/* エリア */}
-                                        <td className="p-2">
-                                            <span className="text-muted-foreground truncate block max-w-[50px]">
-                                                {formatted.area}
                                             </span>
                                         </td>
 
@@ -263,52 +288,6 @@ export function ListPage() {
                                                     <SelectItem value="ng">NG</SelectItem>
                                                 </SelectContent>
                                             </Select>
-                                        </td>
-
-                                        {/* アクション */}
-                                        <td className="p-2">
-                                            <div className="flex gap-1">
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="h-6 w-6 p-0"
-                                                    onClick={() => handleViewDetail(company)}
-                                                    title="詳細"
-                                                >
-                                                    <Eye className="h-3 w-3" />
-                                                </Button>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="h-6 w-6 p-0"
-                                                    onClick={() => openGoogleSearch(formatted.companyName)}
-                                                    title="Google検索"
-                                                >
-                                                    <Search className="h-3 w-3" />
-                                                </Button>
-                                                {company.phone && (
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        className="h-6 w-6 p-0"
-                                                        onClick={() => navigator.clipboard.writeText(company.phone!)}
-                                                        title={company.phone}
-                                                    >
-                                                        <Phone className="h-3 w-3" />
-                                                    </Button>
-                                                )}
-                                                {company.contact_form_url && (
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        className="h-6 w-6 p-0"
-                                                        onClick={() => window.open(company.contact_form_url!, '_blank')}
-                                                        title="問い合わせ"
-                                                    >
-                                                        <FileText className="h-3 w-3" />
-                                                    </Button>
-                                                )}
-                                            </div>
                                         </td>
                                     </tr>
                                 );
