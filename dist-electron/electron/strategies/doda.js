@@ -27,12 +27,12 @@ class DodaStrategy {
         log(`Navigating to: ${searchUrl}`);
         try {
             await page.goto(searchUrl, { waitUntil: 'networkidle', timeout: 30000 });
-            // Vue.js動的レンダリング対応: 求人アイテムが表示されるまで待機
-            await page.waitForSelector('[data-testid="job-item"], .jobCard-card, article', { timeout: 15000 }).catch(() => {
-                log('Warning: Job items selector not found, continuing anyway');
+            // 求人カードが表示されるまで待機
+            await page.waitForSelector('.jobCard-card', { timeout: 15000 }).catch(() => {
+                log('Warning: Job card selector not found, continuing anyway');
             });
             await page.waitForLoadState('networkidle');
-            await page.waitForTimeout(randomDelay(3000, 5000)); // 3-5秒のランダム待機
+            await page.waitForTimeout(randomDelay(3000, 5000));
         }
         catch (error) {
             log(`Error loading search page: ${error}`);
@@ -44,10 +44,10 @@ class DodaStrategy {
         while (hasNext && pageNum < maxPages) {
             pageNum++;
             log(`Scraping page ${pageNum}...`);
-            // スクロールして追加コンテンツを読み込み（無限スクロール対応）
+            // スクロールして追加コンテンツを読み込み
             await this.scrollToBottom(page, log);
             // 求人カードを取得
-            const jobCards = await page.locator('[data-testid="job-item"], .jobCard-card, article.jobCard, .cassetteRecruit').all();
+            const jobCards = await page.locator('.jobCard-card').all();
             log(`Found ${jobCards.length} job cards`);
             if (jobCards.length === 0) {
                 log('No job cards found, stopping');
@@ -56,7 +56,7 @@ class DodaStrategy {
             for (const card of jobCards) {
                 try {
                     // 求人詳細ページへのリンクを取得
-                    const linkEl = card.locator('a[href*="JobSearchDetail"], a.jobCard-header__link, a[href*="/job/"]').first();
+                    const linkEl = card.locator('a.jobCard-header__link').first();
                     const url = await linkEl.getAttribute('href');
                     if (!url) {
                         log('No detail link found, skipping');
@@ -64,17 +64,23 @@ class DodaStrategy {
                     }
                     const fullUrl = url.startsWith('http') ? url : `https://doda.jp${url}`;
                     // リストページから基本情報を抽出
-                    const companyNameEl = card.locator('.companyName, [class*="company"] h3, .jobCard-company').first();
+                    // 会社名: h2要素
+                    const companyNameEl = card.locator('a.jobCard-header__link h2').first();
                     let companyName = (await companyNameEl.textContent())?.trim() || '';
-                    const jobTitleEl = card.locator('.jobCard-header__title, h2, .cassetteRecruit__copy').first();
+                    // 職種: h2の次のp要素
+                    const jobTitleEl = card.locator('a.jobCard-header__link p').first();
                     const jobTitle = (await jobTitleEl.textContent())?.trim() || '';
+                    // リストページから給与・勤務地を抽出
+                    const salaryFromList = await this.extractInfoFromCard(card, '給与');
+                    const locationFromList = await this.extractInfoFromCard(card, '勤務地');
+                    const industryFromList = await this.extractInfoFromCard(card, '事業');
+                    log(`Found: ${companyName}`);
+                    log(`Visiting detail page: ${fullUrl}`);
                     // 詳細ページに移動
-                    log(`Visiting: ${fullUrl}`);
-                    await page.waitForTimeout(this.REQUEST_INTERVAL); // レート制限
+                    await page.waitForTimeout(this.REQUEST_INTERVAL);
                     await page.goto(fullUrl, { waitUntil: 'networkidle', timeout: 30000 });
-                    // Vue.js動的レンダリング対応
                     await page.waitForLoadState('networkidle');
-                    await page.waitForTimeout(randomDelay(3000, 5000)); // 3-5秒待機
+                    await page.waitForTimeout(randomDelay(2000, 4000));
                     // 404チェック
                     const is404 = await page.locator('text=/404|ページが見つかりません/i').count() > 0;
                     if (is404) {
@@ -82,35 +88,35 @@ class DodaStrategy {
                         await page.goBack({ waitUntil: 'networkidle' });
                         continue;
                     }
-                    // 「会社概要」タブをクリック
-                    const companyTabButton = page.locator('button:has-text("会社概要"), a:has-text("会社概要"), [role="tab"]:has-text("会社")').first();
-                    if (await companyTabButton.count() > 0) {
+                    // 会社概要タブをクリック (URLのtabパラメータを変更)
+                    // タブリンク: a[href*="-tab__"]
+                    const companyTabLink = page.locator('a[href*="-tab__co"], a:has-text("会社概要")').first();
+                    if (await companyTabLink.count() > 0) {
                         try {
-                            await companyTabButton.click();
-                            await page.waitForTimeout(randomDelay(1000, 2000));
+                            await companyTabLink.click();
+                            await page.waitForLoadState('networkidle');
+                            await page.waitForTimeout(randomDelay(1500, 3000));
                         }
                         catch (error) {
                             log(`Could not click company tab: ${error}`);
                         }
                     }
-                    // 企業情報を抽出
+                    // 企業情報を抽出 (DescriptionList構造)
                     const companyUrl = await this.extractCompanyUrl(page);
-                    const address = await this.extractTableValue(page, '本社所在地') ||
-                        await this.extractTableValue(page, '勤務地') ||
-                        await this.extractTableValue(page, '所在地');
-                    const industry = await this.extractTableValue(page, '事業内容') ||
-                        await this.extractTableValue(page, '業種');
-                    const employees = await this.extractTableValue(page, '従業員数');
-                    const establishment = await this.extractTableValue(page, '設立');
-                    const representative = await this.extractTableValue(page, '代表者');
-                    const revenue = await this.extractTableValue(page, '売上高');
-                    const phone = await this.extractTableValue(page, '電話番号');
-                    const salaryText = await this.extractTableValue(page, '給与') ||
-                        await this.extractTableValue(page, '年収') ||
-                        await this.extractTableValue(page, '想定年収');
-                    // 求人内容を抽出
-                    const jobDescriptionEl = page.locator('.jobDescriptionText, [class*="description"], .job-detail__content').first();
-                    const jobDescription = (await jobDescriptionEl.textContent())?.trim().substring(0, 500) || ''; // 最初の500文字
+                    const address = await this.extractDescriptionValue(page, '所在地') ||
+                        await this.extractDescriptionValue(page, '本社所在地') ||
+                        await this.extractDescriptionValue(page, '勤務地');
+                    const industry = await this.extractDescriptionValue(page, '事業概要') ||
+                        await this.extractDescriptionValue(page, '事業内容') ||
+                        industryFromList;
+                    const employees = await this.extractDescriptionValue(page, '従業員数');
+                    const establishment = await this.extractDescriptionValue(page, '設立');
+                    const representative = await this.extractDescriptionValue(page, '代表者');
+                    const revenue = await this.extractDescriptionValue(page, '売上高');
+                    const capital = await this.extractDescriptionValue(page, '資本金');
+                    const salaryText = salaryFromList ||
+                        await this.extractDescriptionValue(page, '給与') ||
+                        await this.extractDescriptionValue(page, '年収');
                     // 住所の正規化
                     const normalizedAddress = this.normalizeAddress(address);
                     const cleanName = this.cleanCompanyName(companyName);
@@ -125,17 +131,22 @@ class DodaStrategy {
                         establishment,
                         employees,
                         revenue,
-                        phone: phone, // 求人ページのテーブルから取得できた場合のみ
+                        phone: undefined, // 電話番号はGoogle Maps APIで取得
                         address: normalizedAddress,
-                        area: this.extractAreaFromAddress(normalizedAddress),
+                        area: this.extractAreaFromAddress(normalizedAddress) || locationFromList,
                         homepage_url: companyUrl,
                         industry,
-                        job_description: jobDescription,
                         scrape_status: 'step1_completed',
                     };
                     // リストページに戻る
                     await page.goBack({ waitUntil: 'networkidle' });
-                    await page.waitForTimeout(randomDelay(2000, 4000)); // 2-4秒待機
+                    await page.waitForTimeout(randomDelay(2000, 4000));
+                    // 会社概要タブから戻った場合、さらに戻る必要がある場合
+                    const currentUrl = page.url();
+                    if (!currentUrl.includes('JobSearchList')) {
+                        await page.goBack({ waitUntil: 'networkidle' });
+                        await page.waitForTimeout(randomDelay(1000, 2000));
+                    }
                 }
                 catch (err) {
                     log(`Error scraping job: ${err}`);
@@ -144,7 +155,6 @@ class DodaStrategy {
                         await page.waitForTimeout(2000);
                     }
                     catch {
-                        // リストページに戻れない場合は再度検索ページへ
                         log('Failed to go back, reloading search page');
                         await page.goto(searchUrl, { waitUntil: 'networkidle' });
                         await page.waitForTimeout(3000);
@@ -154,8 +164,9 @@ class DodaStrategy {
                 }
             }
             // 次のページへ
-            await page.waitForTimeout(this.PAGE_INTERVAL); // ページネーション待機
-            const nextButton = page.locator('a:has-text("次へ"), .pager__next a, a[rel="next"], button:has-text("次")').first();
+            await page.waitForTimeout(this.PAGE_INTERVAL);
+            // ページネーション: 次へボタンを探す
+            const nextButton = page.locator('a:has-text("次のページ"), a:has-text("次へ"), a[rel="next"], .pager a:has-text("次")').first();
             if (await nextButton.count() > 0 && await nextButton.isVisible()) {
                 try {
                     await nextButton.click();
@@ -174,7 +185,27 @@ class DodaStrategy {
         }
         log(`Completed scraping ${pageNum} pages`);
     }
-    // スクロールして追加コンテンツを読み込み（無限スクロール対応）
+    // リストページの求人カードから情報を抽出
+    async extractInfoFromCard(card, label) {
+        try {
+            // jobCard-info構造: dt.jobCard-info__title に label があり、dd.jobCard-info__content に値がある
+            const infoItems = await card.locator('dl.jobCard-info').all();
+            for (const item of infoItems) {
+                const titleEl = item.locator('dt.jobCard-info__title');
+                const titleText = await titleEl.textContent();
+                if (titleText && titleText.includes(label)) {
+                    const contentEl = item.locator('dd.jobCard-info__content');
+                    const content = await contentEl.textContent();
+                    return content?.trim() || undefined;
+                }
+            }
+        }
+        catch (error) {
+            // ignore
+        }
+        return undefined;
+    }
+    // スクロールして追加コンテンツを読み込み
     async scrollToBottom(page, log) {
         try {
             let previousHeight = 0;
@@ -183,7 +214,6 @@ class DodaStrategy {
             const maxAttempts = 5;
             while (previousHeight < currentHeight && attempts < maxAttempts) {
                 previousHeight = currentHeight;
-                // 段階的にスクロール
                 await page.evaluate(() => {
                     window.scrollTo(0, document.body.scrollHeight);
                 });
@@ -199,55 +229,61 @@ class DodaStrategy {
             log(`Error during scroll: ${error}`);
         }
     }
-    // 企業URLを抽出
+    // 企業URLを抽出 (DescriptionList内の企業URLリンク)
     async extractCompanyUrl(page) {
-        // 優先順位1: 企業ホームページリンク
-        const homepageLink = page.locator('a:has-text("企業ホームページ"), a:has-text("コーポレートサイト"), a[href*="http"]:has-text("HP")').first();
-        if (await homepageLink.count() > 0) {
-            const href = await homepageLink.getAttribute('href');
-            if (href && !href.includes('doda.jp')) {
-                return href;
+        try {
+            // 企業URLセクションのリンクを探す
+            const companyLink = page.locator('a.jobSearchDetail-companyOverview__link').first();
+            if (await companyLink.count() > 0) {
+                const href = await companyLink.getAttribute('href');
+                if (href && !href.includes('doda.jp')) {
+                    return href;
+                }
+            }
+            // フォールバック: DescriptionListから企業URLを探す
+            const urlValue = await this.extractDescriptionValue(page, '企業URL');
+            if (urlValue) {
+                // URLを抽出 (テキストからURLを取り出す)
+                const urlMatch = urlValue.match(/https?:\/\/[^\s<>"]+/);
+                if (urlMatch) {
+                    return urlMatch[0];
+                }
             }
         }
-        // 優先順位2: 会社概要セクションのリンク
-        const companySection = page.locator('.companyData, .company-info, [class*="company"]');
-        const links = await companySection.locator('a[href^="http"]').all();
-        for (const link of links) {
-            const href = await link.getAttribute('href');
-            if (href && !href.includes('doda.jp') && !href.includes('javascript:')) {
-                return href;
-            }
+        catch (error) {
+            // ignore
         }
         return undefined;
     }
-    // テーブル形式のデータを抽出
-    async extractTableValue(page, label) {
-        // dt/dd パターン
-        const dtEl = page.locator(`dt:has-text("${label}")`).first();
-        if (await dtEl.count() > 0) {
-            const ddEl = dtEl.locator('~ dd').first();
-            if (await ddEl.count() > 0) {
-                return (await ddEl.textContent())?.trim() || undefined;
-            }
-        }
-        // th/td パターン
-        const thEl = page.locator(`th:has-text("${label}")`).first();
-        if (await thEl.count() > 0) {
-            const tdEl = thEl.locator('~ td').first();
-            if (await tdEl.count() > 0) {
-                return (await tdEl.textContent())?.trim() || undefined;
-            }
-        }
-        // ラベル: 値 パターン
-        const labelEl = page.locator(`text=/^${label}[：:]/`).first();
-        if (await labelEl.count() > 0) {
-            const text = await labelEl.textContent();
-            if (text) {
-                const match = text.match(new RegExp(`${label}[：:]\\s*(.+)`));
-                if (match) {
-                    return match[1].trim();
+    // DescriptionList構造からデータを抽出
+    async extractDescriptionValue(page, label) {
+        try {
+            // DescriptionList-module構造
+            const dtElements = await page.locator('dt').all();
+            for (const dt of dtElements) {
+                const dtText = await dt.textContent();
+                if (dtText && dtText.trim() === label) {
+                    // 次の兄弟要素のddを取得
+                    const parent = dt.locator('..');
+                    const dd = parent.locator('dd').first();
+                    if (await dd.count() > 0) {
+                        const text = await dd.textContent();
+                        return text?.trim().replace(/\s+/g, ' ') || undefined;
+                    }
                 }
             }
+            // フォールバック: dt/dd パターン (隣接兄弟)
+            const dtEl = page.locator(`dt:has-text("${label}")`).first();
+            if (await dtEl.count() > 0) {
+                const ddEl = dtEl.locator('~ dd').first();
+                if (await ddEl.count() > 0) {
+                    const text = await ddEl.textContent();
+                    return text?.trim().replace(/\s+/g, ' ') || undefined;
+                }
+            }
+        }
+        catch (error) {
+            // ignore
         }
         return undefined;
     }
@@ -255,16 +291,27 @@ class DodaStrategy {
     normalizeAddress(address) {
         if (!address)
             return undefined;
-        // 既に都道府県から始まっている場合はそのまま
-        if (/^[東京大阪京都神奈川埼玉千葉愛知北海道福岡]/.test(address)) {
-            return address;
+        // 郵便番号を除去
+        let normalized = address.replace(/〒?\d{3}-?\d{4}\s*/g, '').trim();
+        // 改行や余分な空白を整理
+        normalized = normalized.replace(/\s+/g, ' ').trim();
+        // 都道府県から始まるように
+        const prefectures = [
+            '北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県',
+            '茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県',
+            '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県',
+            '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県',
+            '奈良県', '和歌山県', '鳥取県', '島根県', '岡山県', '広島県', '山口県',
+            '徳島県', '香川県', '愛媛県', '高知県', '福岡県', '佐賀県', '長崎県',
+            '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県'
+        ];
+        for (const pref of prefectures) {
+            const idx = normalized.indexOf(pref);
+            if (idx !== -1) {
+                return normalized.substring(idx);
+            }
         }
-        // 都道府県を探して、そこから始まるように切り出す
-        const match = address.match(/([東京大阪京都神奈川埼玉千葉愛知北海道福岡].*?[都道府県市区町村].+)/);
-        if (match) {
-            return match[1];
-        }
-        return address;
+        return normalized;
     }
     cleanCompanyName(name) {
         return name
@@ -278,8 +325,21 @@ class DodaStrategy {
     extractAreaFromAddress(address) {
         if (!address)
             return '';
-        const match = address.match(/([東京大阪京都神奈川埼玉千葉愛知北海道福岡].*?[都道府県市区町村])/);
-        return match ? match[1] : '';
+        const prefectures = [
+            '北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県',
+            '茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県',
+            '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県',
+            '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県',
+            '奈良県', '和歌山県', '鳥取県', '島根県', '岡山県', '広島県', '山口県',
+            '徳島県', '香川県', '愛媛県', '高知県', '福岡県', '佐賀県', '長崎県',
+            '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県'
+        ];
+        for (const pref of prefectures) {
+            if (address.includes(pref)) {
+                return pref;
+            }
+        }
+        return '';
     }
 }
 exports.DodaStrategy = DodaStrategy;
