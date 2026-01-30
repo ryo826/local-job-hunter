@@ -22,12 +22,12 @@ export class RikunabiStrategy implements ScrapingStrategy {
         };
 
         // 検索結果ページURL構築
-        // リクナビNEXTはエリア指定URLを使用（全国 or 東京エリア）
-        let searchUrl = 'https://next.rikunabi.com/job_search/area-tokyo/';
+        // リクナビNEXTは ?nw=true パラメータを使用
+        let searchUrl = 'https://next.rikunabi.com/job_search/?nw=true';
 
         if (keywords) {
             // キーワード検索の場合
-            searchUrl = `https://next.rikunabi.com/job_search/area-tokyo/?kw=${encodeURIComponent(keywords)}`;
+            searchUrl = `https://next.rikunabi.com/job_search/?nw=true&kw=${encodeURIComponent(keywords)}`;
         }
 
         log(`Navigating to: ${searchUrl}`);
