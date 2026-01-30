@@ -253,9 +253,12 @@ export class MynaviStrategy implements ScrapingStrategy {
                         }
                     }
 
-                    // 求人内容を抽出
+                    // 求人内容を抽出（要素が存在する場合のみ）
+                    let jobDescription = '';
                     const jobDescriptionEl = page.locator('.jobDescriptionText, [class*="description"], .recruitContents, [class*="job-detail"]').first();
-                    const jobDescription = (await jobDescriptionEl.textContent())?.trim().substring(0, 500) || '';
+                    if (await jobDescriptionEl.count() > 0) {
+                        jobDescription = (await jobDescriptionEl.textContent())?.trim().substring(0, 500) || '';
+                    }
 
                     // 住所の正規化
                     const normalizedAddress = this.normalizeAddress(address);
