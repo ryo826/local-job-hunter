@@ -144,9 +144,6 @@ export function SearchPage() {
                                 <Clock className="h-4 w-4 text-muted-foreground" />
                                 <Badge variant="secondary">⏱ 最大実行時間: 60分</Badge>
                             </div>
-                            <p className="text-xs text-muted-foreground">
-                                ※ 連続50件の重複で自動停止します
-                            </p>
 
                             {!isScrapingRunning ? (
                                 <Button
