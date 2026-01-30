@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Search, Table2, Settings } from 'lucide-react';
+import { Home, Search, Table2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
@@ -7,7 +7,6 @@ const navigationItems = [
     { label: 'ダッシュボード', href: '/', icon: Home },
     { label: '検索', href: '/search', icon: Search },
     { label: 'リスト', href: '/list', icon: Table2 },
-    { label: '設定', href: '/settings', icon: Settings },
 ];
 
 export function Sidebar() {

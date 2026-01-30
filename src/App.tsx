@@ -4,7 +4,6 @@ import { Sidebar } from './components/Sidebar';
 import { DashboardPage } from './pages/DashboardPage';
 import { SearchPage } from './pages/SearchPage';
 import { ListPage } from './pages/ListPage';
-import { SettingsPage } from './pages/SettingsPage';
 import { useAppStore } from './stores/appStore';
 import './index.css';
 
@@ -25,7 +24,6 @@ function App() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/list" element={<ListPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </main>
       </div>

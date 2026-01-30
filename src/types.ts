@@ -65,6 +65,14 @@ export interface IElectronAPI {
         onLog: (callback: (message: string) => void) => void;
         offLog: () => void;
     };
+    enrich: {
+        startPhoneLookup: () => Promise<{ success: boolean; error?: string; updated?: number; total?: number }>;
+        getStats: () => Promise<{ total: number; withPhone: number; withoutPhone: number }>;
+        onProgress: (callback: (progress: { current: number; total: number; companyName: string }) => void) => void;
+        offProgress: () => void;
+        onLog: (callback: (message: string) => void) => void;
+        offLog: () => void;
+    };
 }
 
 declare global {

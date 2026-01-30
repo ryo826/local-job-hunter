@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
     Dialog,
@@ -20,7 +19,6 @@ import {
 } from '@/components/ui/select';
 import { ExternalLink, Eye, Phone, Loader2 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
-import { ngWords } from '@/config/settings';
 import type { Company } from '@/types';
 import { formatCompanyData } from '@/utils/companyFormatter';
 
@@ -108,10 +106,6 @@ export function ListPage() {
         } else {
             setSelectedRows(new Set(companies.map((c) => c.id)));
         }
-    };
-
-    const isNgCandidate = (companyName: string) => {
-        return ngWords.some((word) => companyName.toLowerCase().includes(word.toLowerCase()));
     };
 
     const getSourceBadge = (source: string) => {
@@ -241,12 +235,11 @@ export function ListPage() {
                         <tbody className="divide-y">
                             {companies.map((company) => {
                                 const formatted = formatCompanyData(company);
-                                const isNg = isNgCandidate(company.company_name);
 
                                 return (
                                     <tr
                                         key={company.id}
-                                        className={`hover:bg-muted/30 h-9 ${isNg ? 'bg-red-50 dark:bg-red-950/20' : ''}`}
+                                        className="hover:bg-muted/30 h-9"
                                     >
                                         {/* Checkbox */}
                                         <td className="p-2">
@@ -258,18 +251,15 @@ export function ListPage() {
 
                                         {/* 会社名 */}
                                         <td className="p-2">
-                                            <div className="flex items-center gap-1">
-                                                <a
-                                                    href={company.url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="text-blue-600 hover:text-blue-800 dark:text-blue-400 truncate max-w-[140px] font-medium"
-                                                    title={formatted.fullCompanyName}
-                                                >
-                                                    {formatted.companyName}
-                                                </a>
-                                                {isNg && <span className="text-red-500 text-[10px]" title="NG候補">⚠</span>}
-                                            </div>
+                                            <a
+                                                href={company.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-blue-600 hover:text-blue-800 dark:text-blue-400 truncate max-w-[140px] font-medium block"
+                                                title={formatted.fullCompanyName}
+                                            >
+                                                {formatted.companyName}
+                                            </a>
                                         </td>
 
                                         {/* 詳細ボタン */}

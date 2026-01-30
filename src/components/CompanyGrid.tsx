@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ngWords, statusOptions, sourceOptions } from '../config/settings';
+import { statusOptions, sourceOptions } from '../config/settings';
 import type { Company } from '../types';
 import { useAppStore } from '../stores/appStore';
 import { formatCompanyData, type FormattedCompany } from '../utils/companyFormatter';
@@ -148,10 +148,6 @@ export const CompanyGrid: React.FC<CompanyGridProps> = ({ companies }) => {
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
     const [modalOpen, setModalOpen] = useState(false);
 
-    const isNgCompany = (company: Company): boolean => {
-        return ngWords.some((word) => company.company_name.includes(word));
-    };
-
     const getStatusBadge = (status: string) => {
         const option = statusOptions.find((opt) => opt.value === status);
         return option || { value: status, label: status, color: 'gray' };
@@ -197,31 +193,23 @@ export const CompanyGrid: React.FC<CompanyGridProps> = ({ companies }) => {
                             {companies.map((company) => {
                                 const formatted = formatCompanyData(company);
                                 const statusBadge = getStatusBadge(company.status);
-                                const isNg = isNgCompany(company);
 
                                 return (
                                     <tr
                                         key={company.id}
-                                        className={`hover:bg-gray-800/30 h-10 ${isNg ? 'bg-red-900/20' : ''}`}
+                                        className="hover:bg-gray-800/30 h-10"
                                     >
                                         {/* 会社名 */}
                                         <td className="px-2 py-1">
-                                            <div className="flex items-center gap-1">
-                                                <a
-                                                    href={company.url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="text-blue-400 hover:text-blue-300 truncate max-w-[150px]"
-                                                    title={formatted.fullCompanyName}
-                                                >
-                                                    {formatted.companyName}
-                                                </a>
-                                                {isNg && (
-                                                    <span className="text-red-400 text-[10px]" title="NGワード検出">
-                                                        ⚠
-                                                    </span>
-                                                )}
-                                            </div>
+                                            <a
+                                                href={company.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-blue-400 hover:text-blue-300 truncate max-w-[150px] block"
+                                                title={formatted.fullCompanyName}
+                                            >
+                                                {formatted.companyName}
+                                            </a>
                                         </td>
 
                                         {/* 業種 */}

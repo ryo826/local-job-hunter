@@ -13,7 +13,6 @@ const DataConverter_1 = require("./services/DataConverter");
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const path_1 = __importDefault(require("path"));
 const electron_1 = require("electron");
-const SMART_STOP_THRESHOLD = 50;
 const TIMEOUT_MS = 60 * 60 * 1000; // 60 min
 class ScrapingEngine {
     browser = null;
@@ -84,7 +83,6 @@ class ScrapingEngine {
                     });
                     await strategy.login(page);
                 }
-                let consecutiveDuplicates = 0;
                 let newCount = 0;
                 let duplicateCount = 0;
                 let current = 0;
@@ -101,19 +99,9 @@ class ScrapingEngine {
                         const uniqueKey = company.url;
                         const exists = database_1.companyRepository.exists(uniqueKey);
                         if (exists) {
-                            consecutiveDuplicates++;
                             duplicateCount++;
-                            if (consecutiveDuplicates >= SMART_STOP_THRESHOLD) {
-                                onProgress({
-                                    current, total: current, newCount, duplicateCount,
-                                    source: strategy.source,
-                                    status: `Smart Stop: 連続${SMART_STOP_THRESHOLD}件の重複を検出 (停止)`
-                                });
-                                break;
-                            }
                         }
                         else {
-                            consecutiveDuplicates = 0;
                             newCount++;
                         }
                         // 既存: CompanyDataとして保存(B2B営業用)

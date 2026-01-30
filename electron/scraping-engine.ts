@@ -18,7 +18,6 @@ export interface ScrapingProgress {
     duplicateCount: number;
 }
 
-const SMART_STOP_THRESHOLD = 50;
 const TIMEOUT_MS = 60 * 60 * 1000; // 60 min
 
 export class ScrapingEngine {
@@ -103,7 +102,6 @@ export class ScrapingEngine {
                     await strategy.login(page);
                 }
 
-                let consecutiveDuplicates = 0;
                 let newCount = 0;
                 let duplicateCount = 0;
                 let current = 0;
@@ -123,19 +121,8 @@ export class ScrapingEngine {
                         const exists = companyRepository.exists(uniqueKey);
 
                         if (exists) {
-                            consecutiveDuplicates++;
                             duplicateCount++;
-
-                            if (consecutiveDuplicates >= SMART_STOP_THRESHOLD) {
-                                onProgress({
-                                    current, total: current, newCount, duplicateCount,
-                                    source: strategy.source,
-                                    status: `Smart Stop: 連続${SMART_STOP_THRESHOLD}件の重複を検出 (停止)`
-                                });
-                                break;
-                            }
                         } else {
-                            consecutiveDuplicates = 0;
                             newCount++;
                         }
 
