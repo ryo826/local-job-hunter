@@ -353,13 +353,26 @@ class DodaStrategy {
         return normalized;
     }
     cleanCompanyName(name) {
-        return name
+        let cleaned = name
+            // パイプ以降を削除（求人タイトルが含まれている場合）
+            .split(/[|｜]/)[0]
+            // 法人格を削除
             .replace(/株式会社|有限会社|合同会社|一般社団法人|公益財団法人/g, '')
+            // 括弧内を削除
             .replace(/【.*?】/g, '')
             .replace(/\(.*?\)/g, '')
             .replace(/（.*?）/g, '')
+            .replace(/\[.*?\]/g, '')
+            // プライム市場等の表記を削除
+            .replace(/プライム市場|スタンダード市場|グロース市場|東証一部|東証二部|TOKYO PRO Market/g, '')
+            // 全角英数字を半角に変換
+            .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+            // 全角スペースを半角に
+            .replace(/　/g, ' ')
+            // 余分な空白を整理
             .replace(/\s+/g, ' ')
             .trim();
+        return cleaned;
     }
     extractAreaFromAddress(address) {
         if (!address)

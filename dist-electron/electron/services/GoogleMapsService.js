@@ -26,6 +26,23 @@ class GoogleMapsService {
         this.lastRequestTime = Date.now();
     }
     /**
+     * Normalize company name for better search results
+     */
+    normalizeCompanyName(name) {
+        return name
+            // パイプ以降を削除
+            .split(/[|｜]/)[0]
+            // 全角英数字を半角に変換
+            .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+            // 全角スペースを半角に
+            .replace(/　/g, ' ')
+            // 余分な記号を削除
+            .replace(/[【】\[\]]/g, '')
+            // 余分な空白を整理
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+    /**
      * Find company phone number using Google Maps Places API
      * @param companyName Company name to search for
      * @param address Optional address to improve search accuracy
@@ -34,8 +51,12 @@ class GoogleMapsService {
     async findCompanyPhone(companyName, address) {
         try {
             await this.rateLimit();
+            // Normalize company name
+            const normalizedName = this.normalizeCompanyName(companyName);
+            // Normalize address (remove excess whitespace and newlines)
+            const normalizedAddress = address?.replace(/\s+/g, ' ').trim();
             // Build search query
-            const query = address ? `${companyName} ${address}` : companyName;
+            const query = normalizedAddress ? `${normalizedName} ${normalizedAddress}` : normalizedName;
             // Step 1: Text Search to find the place
             const searchResponse = await axios_1.default.get(`${this.baseUrl}/textsearch/json`, {
                 params: {
