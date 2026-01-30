@@ -8,12 +8,22 @@ exports.initDB = initDB;
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const path_1 = __importDefault(require("path"));
 const electron_1 = require("electron");
-const dbPath = path_1.default.join(electron_1.app.getPath('userData'), 'companies.db');
-const db = new better_sqlite3_1.default(dbPath);
+// 遅延初期化: app.whenReady()の後にのみデータベースを作成
+let db = null;
+let dbPath = null;
+function getDb() {
+    if (!db) {
+        dbPath = path_1.default.join(electron_1.app.getPath('userData'), 'companies.db');
+        db = new better_sqlite3_1.default(dbPath);
+        console.log(`[Database] Connected to: ${dbPath}`);
+    }
+    return db;
+}
 // Initialize DB
 function initDB() {
+    const database = getDb();
     // 既存の企業テーブル(B2B営業用)
-    db.exec(`
+    database.exec(`
     CREATE TABLE IF NOT EXISTS companies (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       company_name TEXT NOT NULL,
@@ -141,6 +151,7 @@ function initDB() {
 // Repository Functions
 exports.companyRepository = {
     getAll: (filters) => {
+        const database = getDb();
         let query = 'SELECT * FROM companies WHERE 1=1';
         const params = [];
         if (filters.status) {
@@ -155,25 +166,28 @@ exports.companyRepository = {
             params.push(term, term, term, term, term);
         }
         query += ' ORDER BY created_at DESC';
-        return db.prepare(query).all(...params);
+        return database.prepare(query).all(...params);
     },
     getById: (id) => {
-        return db.prepare('SELECT * FROM companies WHERE id = ?').get(id);
+        const database = getDb();
+        return database.prepare('SELECT * FROM companies WHERE id = ?').get(id);
     },
     update: (id, updates) => {
+        const database = getDb();
         const keys = Object.keys(updates).filter((key) => key !== 'id');
         if (keys.length === 0)
             return;
         const setClause = keys.map((key) => `${key} = ?`).join(', ');
         const values = keys.map((key) => updates[key]);
-        db.prepare(`UPDATE companies SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values, id);
+        database.prepare(`UPDATE companies SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values, id);
     },
     // Safe Upsert for B Rollar
     // 既存データがある場合、PROTECTEDフィールドは更新しない
     safeUpsert: (company) => {
+        const database = getDb();
         if (!company.url || !company.company_name)
             return;
-        const existing = db.prepare('SELECT * FROM companies WHERE url = ?').get(company.url);
+        const existing = database.prepare('SELECT * FROM companies WHERE url = ?').get(company.url);
         if (!existing) {
             // INSERT
             const keys = [
@@ -207,7 +221,7 @@ exports.companyRepository = {
             const placeholders = Object.keys(insertData).map(() => '?').join(', ');
             const values = Object.values(insertData);
             try {
-                db.prepare(`INSERT INTO companies (${columns}) VALUES (${placeholders})`).run(...values);
+                database.prepare(`INSERT INTO companies (${columns}) VALUES (${placeholders})`).run(...values);
                 return { isNew: true };
             }
             catch (e) {
@@ -253,13 +267,14 @@ exports.companyRepository = {
             if (keys.length > 0) {
                 const setClause = keys.map((k) => `${k} = ?`).join(', ');
                 const values = keys.map((k) => updateFields[k]);
-                db.prepare(`UPDATE companies SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values, existing.id);
+                database.prepare(`UPDATE companies SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values, existing.id);
             }
             return { isNew: false };
         }
     },
     exists: (url) => {
-        const result = db.prepare('SELECT 1 FROM companies WHERE url = ?').get(url);
+        const database = getDb();
+        const result = database.prepare('SELECT 1 FROM companies WHERE url = ?').get(url);
         return !!result;
     }
 };

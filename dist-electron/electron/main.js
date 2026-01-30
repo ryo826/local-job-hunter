@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -8,8 +41,7 @@ const path_1 = __importDefault(require("path"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const database_1 = require("./database");
 const scraping_engine_1 = require("./scraping-engine");
-const gemini_1 = require("./services/gemini");
-// Load environment variables
+// Load environment variables from .env file
 dotenv_1.default.config();
 let mainWindow = null;
 let scrapingEngine = null;
@@ -62,38 +94,6 @@ electron_1.ipcMain.handle('db:updateCompany', async (_event, id, updates) => {
         return { success: false, error: String(error) };
     }
 });
-electron_1.ipcMain.handle('ai:analyze', async (_event, id) => {
-    try {
-        const company = database_1.companyRepository.getById(id);
-        if (!company) {
-            return { success: false, error: 'Company not found' };
-        }
-        // Create context for AI analysis
-        const textContext = [
-            `社名: ${company.company_name}`,
-            company.industry ? `業種: ${company.industry}` : '',
-            company.address ? `住所: ${company.address}` : '',
-            company.job_title ? `募集職種: ${company.job_title}` : '',
-            company.salary_text ? `給与: ${company.salary_text}` : '',
-            company.representative ? `代表者: ${company.representative}` : '',
-            company.establishment ? `設立: ${company.establishment}` : '',
-            company.employees ? `従業員数: ${company.employees}` : '',
-            company.revenue ? `売上高: ${company.revenue}` : '',
-            company.note ? `メモ: ${company.note}` : ''
-        ].filter(Boolean).join('\n');
-        const analysis = await gemini_1.geminiService.analyzeCompany(textContext);
-        // Save AI analysis results to database
-        database_1.companyRepository.update(id, {
-            ai_summary: analysis.summary,
-            ai_tags: JSON.stringify(analysis.tags)
-        });
-        return { success: true, data: analysis };
-    }
-    catch (error) {
-        console.error('AI analysis error:', error);
-        return { success: false, error: String(error) };
-    }
-});
 electron_1.ipcMain.handle('scraper:start', async (_event, options) => {
     if (scrapingEngine) {
         return { success: false, error: 'Scraping already in progress' };
@@ -120,4 +120,56 @@ electron_1.ipcMain.handle('scraper:stop', async () => {
         scrapingEngine = null;
     }
     return { success: true };
+});
+// Google Maps API Enrichment
+electron_1.ipcMain.handle('enrich:startPhoneLookup', async () => {
+    try {
+        const { getGoogleMapsService } = await Promise.resolve().then(() => __importStar(require('./services/GoogleMapsService')));
+        const service = getGoogleMapsService();
+        if (!service) {
+            return { success: false, error: 'GOOGLE_MAPS_API_KEY not configured. Please set it in .env file.' };
+        }
+        // 電話番号がない会社を取得
+        const companiesWithoutPhone = database_1.companyRepository.getAll({})
+            .filter(c => !c.phone);
+        if (companiesWithoutPhone.length === 0) {
+            return { success: true, message: 'All companies already have phone numbers', updated: 0 };
+        }
+        let updated = 0;
+        const total = companiesWithoutPhone.length;
+        for (let i = 0; i < companiesWithoutPhone.length; i++) {
+            const company = companiesWithoutPhone[i];
+            // Progress notification
+            mainWindow?.webContents.send('enrich:progress', {
+                current: i + 1,
+                total,
+                companyName: company.company_name,
+            });
+            const phone = await service.findCompanyPhone(company.company_name, company.address);
+            if (phone) {
+                database_1.companyRepository.update(company.id, { phone });
+                updated++;
+                mainWindow?.webContents.send('enrich:log', `Found phone for ${company.company_name}: ${phone}`);
+            }
+            else {
+                mainWindow?.webContents.send('enrich:log', `No phone found for ${company.company_name}`);
+            }
+        }
+        return { success: true, updated, total };
+    }
+    catch (error) {
+        console.error('Enrichment error:', error);
+        return { success: false, error: String(error) };
+    }
+});
+// Get companies without phone numbers count
+electron_1.ipcMain.handle('enrich:getStats', async () => {
+    const allCompanies = database_1.companyRepository.getAll({});
+    const withPhone = allCompanies.filter(c => c.phone);
+    const withoutPhone = allCompanies.filter(c => !c.phone);
+    return {
+        total: allCompanies.length,
+        withPhone: withPhone.length,
+        withoutPhone: withoutPhone.length,
+    };
 });

@@ -1,43 +1,46 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MynaviStrategy = void 0;
 // ランダム待機時間のヘルパー関数
 function randomDelay(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
+// 求人カードのセレクター候補（優先順位順）
+const JOB_CARD_SELECTORS = [
+    '.cassetteRecruitRecommend__content', // 実際のHTML構造
+    '.cassetteRecruit__content',
+    '.cassetteRecruit',
+    '[class*="cassetteRecruit"]',
+    'article[class*="recruit"]',
+    '[class*="recruitCard"]',
+    '[class*="jobCard"]',
+    '.searchResultItem',
+];
+// 求人詳細リンクのセレクター候補
+const JOB_LINK_SELECTORS = [
+    'a[href*="/jobinfo-"]', // 実際のHTML: //tenshoku.mynavi.jp/jobinfo-405430-1-7-1/
+    'a.linkArrowS', // 「求人詳細を見る」リンク
+    'a.js__ga--setCookieOccName', // 求人タイトルリンク
+    'a[href*="/jobinfo/"]',
+    'a[href*="/msg/"]',
+];
+// 会社名セレクター候補
+const COMPANY_NAME_SELECTORS = [
+    'h3.cassetteRecruitRecommend__name', // 実際のHTML構造
+    '.cassetteRecruitRecommend__name',
+    '.cassetteRecruit__name',
+    '.companyName',
+    '[class*="companyName"]',
+];
+// 求人タイトルセレクター候補
+const JOB_TITLE_SELECTORS = [
+    '.cassetteRecruitRecommend__copy a', // 実際のHTML構造
+    'p.cassetteRecruitRecommend__copy a',
+    '.cassetteRecruit__copy a',
+    '.cassetteRecruit__heading',
+    'h2 a',
+    'h3 a',
+];
 class MynaviStrategy {
     source = 'mynavi';
     // レート制限設定
@@ -71,44 +74,126 @@ class MynaviStrategy {
             log(`Error loading search page: ${error}`);
             return;
         }
+        // 求人カードの出現を待機（複数のセレクターを試行）
+        log('Waiting for job cards to appear...');
+        const cardSelector = await this.waitForAnySelector(page, JOB_CARD_SELECTORS, 15000, log);
+        if (!cardSelector) {
+            log('ERROR: No job cards found with any known selector');
+            log('Available selectors tried: ' + JOB_CARD_SELECTORS.join(', '));
+            // デバッグ用：ページの主要な要素を確認
+            const debugInfo = await this.getPageDebugInfo(page);
+            log(`Debug info: ${debugInfo}`);
+            return;
+        }
+        log(`Using card selector: ${cardSelector}`);
         let hasNext = true;
         let pageNum = 0;
         const maxPages = 10;
+        let currentSearchUrl = searchUrl;
         while (hasNext && pageNum < maxPages) {
             pageNum++;
             log(`Scraping page ${pageNum}...`);
             // 求人カードを取得
-            const jobCards = await page.locator('.cassetteRecruit, [class*="recruitList"] > li, article[class*="recruit"]').all();
+            const jobCards = await page.locator(cardSelector).all();
             log(`Found ${jobCards.length} job cards`);
             if (jobCards.length === 0) {
-                log('No job cards found, stopping');
+                log('No job cards found on this page, stopping');
                 break;
             }
+            // 各カードからURLリストを先に抽出（ページ遷移しても失われないように）
+            const jobUrls = [];
             for (const card of jobCards) {
                 try {
-                    // 求人詳細ページへのリンクを取得
-                    const linkEl = card.locator('a[href*="/job-detail/"], a.recruitTitle, h2 a').first();
-                    const url = await linkEl.getAttribute('href');
+                    // リンクを取得（複数のセレクターを試行）
+                    let url = null;
+                    for (const linkSelector of JOB_LINK_SELECTORS) {
+                        const linkEl = card.locator(linkSelector).first();
+                        if (await linkEl.count() > 0) {
+                            url = await linkEl.getAttribute('href');
+                            if (url)
+                                break;
+                        }
+                    }
                     if (!url) {
-                        log('No detail link found, skipping');
+                        // フォールバック: カード内の最初のリンクを取得
+                        const anyLink = card.locator('a[href]').first();
+                        if (await anyLink.count() > 0) {
+                            url = await anyLink.getAttribute('href');
+                        }
+                    }
+                    if (!url || url.includes('javascript:')) {
                         continue;
                     }
-                    const fullUrl = url.startsWith('http') ? url : `https://tenshoku.mynavi.jp${url}`;
-                    // リストページから基本情報を抽出
-                    const companyNameEl = card.locator('.companyName, [class*="company"] h3, .cassetteRecruit__name').first();
-                    let companyName = (await companyNameEl.textContent())?.trim() || '';
-                    const jobTitleEl = card.locator('.cassetteRecruit__copy, h2, .recruitTitle').first();
-                    const jobTitle = (await jobTitleEl.textContent())?.trim() || '';
-                    // 詳細ページに移動
-                    log(`Visiting: ${fullUrl}`);
+                    // URL正規化: 二重ドメインや不正なパスを修正
+                    let fullUrl;
+                    if (url.startsWith('http')) {
+                        fullUrl = url;
+                    }
+                    else if (url.startsWith('//')) {
+                        // プロトコル相対URL (//tenshoku.mynavi.jp/...)
+                        fullUrl = `https:${url}`;
+                    }
+                    else if (url.includes('tenshoku.mynavi.jp')) {
+                        // ドメインが含まれているが http:// がない場合
+                        const match = url.match(/tenshoku\.mynavi\.jp(\/.*)/);
+                        if (match) {
+                            fullUrl = `https://tenshoku.mynavi.jp${match[1]}`;
+                        }
+                        else {
+                            fullUrl = `https://${url.replace(/^\/+/, '')}`;
+                        }
+                    }
+                    else {
+                        // 相対パス
+                        fullUrl = `https://tenshoku.mynavi.jp${url.startsWith('/') ? '' : '/'}${url}`;
+                    }
+                    // マイナビ以外のURLはスキップ
+                    if (!fullUrl.includes('mynavi.jp')) {
+                        continue;
+                    }
+                    // /msg/ URLを通常の詳細ページURLに変換
+                    // 例: /jobinfo-143434-1-104-1/msg/ → /jobinfo-143434-1-104-1/
+                    if (fullUrl.includes('/msg/')) {
+                        fullUrl = fullUrl.replace(/\/msg\/?$/, '/');
+                    }
+                    // 会社名を取得
+                    let companyName = '';
+                    for (const nameSelector of COMPANY_NAME_SELECTORS) {
+                        const nameEl = card.locator(nameSelector).first();
+                        if (await nameEl.count() > 0) {
+                            companyName = (await nameEl.textContent())?.trim() || '';
+                            if (companyName)
+                                break;
+                        }
+                    }
+                    // 求人タイトルを取得
+                    let jobTitle = '';
+                    for (const titleSelector of JOB_TITLE_SELECTORS) {
+                        const titleEl = card.locator(titleSelector).first();
+                        if (await titleEl.count() > 0) {
+                            jobTitle = (await titleEl.textContent())?.trim() || '';
+                            if (jobTitle)
+                                break;
+                        }
+                    }
+                    jobUrls.push({ url: fullUrl, companyName, jobTitle });
+                }
+                catch (err) {
+                    log(`Error extracting job URL from card: ${err}`);
+                }
+            }
+            log(`Extracted ${jobUrls.length} valid job URLs`);
+            // 各求人詳細ページを訪問
+            for (const jobInfo of jobUrls) {
+                try {
+                    log(`Visiting: ${jobInfo.url}`);
                     await page.waitForTimeout(this.REQUEST_INTERVAL); // レート制限
-                    await page.goto(fullUrl, { waitUntil: 'networkidle', timeout: 30000 });
+                    await page.goto(jobInfo.url, { waitUntil: 'networkidle', timeout: 30000 });
                     await page.waitForTimeout(randomDelay(2000, 5000)); // 2-5秒待機
                     // 404チェック
-                    const is404 = await page.locator('text=/404|ページが見つかりません/i').count() > 0;
+                    const is404 = await page.locator('text=/404|ページが見つかりません|お探しのページは|掲載が終了/i').count() > 0;
                     if (is404) {
-                        log('404 page detected, skipping');
-                        await page.goBack({ waitUntil: 'networkidle' });
+                        log('Page not found or job expired, skipping');
                         continue;
                     }
                     // 企業情報を抽出
@@ -124,37 +209,38 @@ class MynaviStrategy {
                     const revenue = await this.extractTableValue(page, '売上高');
                     const phone = await this.extractTableValue(page, '電話番号');
                     const salaryText = await this.extractTableValue(page, '給与') ||
-                        await this.extractTableValue(page, '年収');
-                    // 求人内容を抽出
-                    const jobDescriptionEl = page.locator('.jobDescriptionText, [class*="description"], .recruitContents').first();
-                    const jobDescription = (await jobDescriptionEl.textContent())?.trim().substring(0, 500) || ''; // 最初の500文字
-                    // 住所の正規化（都道府県から始まる形式に）
-                    const normalizedAddress = this.normalizeAddress(address);
-                    const cleanName = this.cleanCompanyName(companyName);
-                    // Step 2: 企業URLがある場合は連絡先情報を抽出
-                    let contactInfo = {};
-                    let finalScrapeStatus = 'step1_completed';
-                    if (companyUrl) {
-                        try {
-                            log(`Step 2: Extracting contact info from ${companyUrl}`);
-                            const { ContactExtractor } = await Promise.resolve().then(() => __importStar(require('./contact-extractor')));
-                            const extractor = new ContactExtractor();
-                            contactInfo = await extractor.extract(page, companyUrl, onLog);
-                            if (contactInfo.phoneNumber || contactInfo.email) {
-                                finalScrapeStatus = 'step2_completed';
-                                log(`Step 2 completed: phone=${contactInfo.phoneNumber}, email=${contactInfo.email}`);
-                            }
-                            else {
-                                log('Step 2: No contact info found');
-                            }
-                        }
-                        catch (error) {
-                            log(`Step 2 error: ${error}`);
+                        await this.extractTableValue(page, '年収') ||
+                        await this.extractTableValue(page, '想定年収');
+                    // 会社名が空の場合はページから取得を試みる
+                    let companyName = jobInfo.companyName;
+                    if (!companyName) {
+                        const pageCompanyEl = page.locator('.companyName, [class*="company-name"], h1 + p, .recruiter').first();
+                        if (await pageCompanyEl.count() > 0) {
+                            companyName = (await pageCompanyEl.textContent())?.trim() || '';
                         }
                     }
+                    // 求人タイトルが空の場合はページから取得を試みる
+                    let jobTitle = jobInfo.jobTitle;
+                    if (!jobTitle) {
+                        const pageTitleEl = page.locator('h1, .jobTitle, [class*="job-title"]').first();
+                        if (await pageTitleEl.count() > 0) {
+                            jobTitle = (await pageTitleEl.textContent())?.trim() || '';
+                        }
+                    }
+                    // 求人内容を抽出（要素が存在する場合のみ）
+                    let jobDescription = '';
+                    const jobDescriptionEl = page.locator('.jobDescriptionText, [class*="description"], .recruitContents, [class*="job-detail"]').first();
+                    if (await jobDescriptionEl.count() > 0) {
+                        jobDescription = (await jobDescriptionEl.textContent())?.trim().substring(0, 500) || '';
+                    }
+                    // 住所の正規化
+                    const normalizedAddress = this.normalizeAddress(address);
+                    const cleanName = this.cleanCompanyName(companyName);
+                    // Note: 電話番号はGoogle Maps APIで後から取得するため、Step 2はスキップ
+                    // スクレイピング速度が大幅に向上
                     yield {
                         source: this.source,
-                        url: fullUrl,
+                        url: jobInfo.url,
                         company_name: cleanName,
                         job_title: jobTitle,
                         salary_text: salaryText,
@@ -162,44 +248,61 @@ class MynaviStrategy {
                         establishment,
                         employees,
                         revenue,
-                        phone: contactInfo.phoneNumber || phone,
-                        email: contactInfo.email,
+                        phone: phone, // 求人ページのテーブルから取得できた場合のみ
                         address: normalizedAddress,
                         area: this.extractAreaFromAddress(normalizedAddress),
                         homepage_url: companyUrl,
-                        contact_page_url: contactInfo.contactPageUrl,
                         industry,
                         job_description: jobDescription,
-                        scrape_status: finalScrapeStatus,
+                        scrape_status: 'step1_completed',
                     };
-                    // リストページに戻る
-                    await page.goBack({ waitUntil: 'networkidle' });
-                    await page.waitForTimeout(randomDelay(2000, 4000)); // 2-4秒待機
                 }
                 catch (err) {
                     log(`Error scraping job: ${err}`);
-                    try {
-                        await page.goBack({ waitUntil: 'networkidle' });
-                        await page.waitForTimeout(2000);
-                    }
-                    catch {
-                        // リストページに戻れない場合は再度検索ページへ
-                        log('Failed to go back, reloading search page');
-                        await page.goto(searchUrl, { waitUntil: 'networkidle' });
-                        await page.waitForTimeout(3000);
-                        break;
-                    }
                     continue;
                 }
             }
-            // 次のページへ
-            await page.waitForTimeout(this.PAGE_INTERVAL); // ページネーション待機
-            const nextButton = page.locator('a:has-text("次へ"), .pager__next a, a[rel="next"]').first();
+            // 次のページへ（URLを直接使用してナビゲート）
+            await page.waitForTimeout(this.PAGE_INTERVAL);
+            // 検索結果ページに戻る
+            log('Returning to search results...');
+            await page.goto(currentSearchUrl, { waitUntil: 'networkidle', timeout: 30000 });
+            await page.waitForTimeout(randomDelay(2000, 4000));
+            // 次ページボタンを探す
+            const nextButton = page.locator('a:has-text("次へ"), .pager__next a, a[rel="next"], [class*="pagination"] a:has-text("次"), a.next').first();
             if (await nextButton.count() > 0 && await nextButton.isVisible()) {
                 try {
-                    await nextButton.click();
-                    await page.waitForLoadState('networkidle');
-                    await page.waitForTimeout(randomDelay(3000, 5000));
+                    const nextUrl = await nextButton.getAttribute('href');
+                    if (nextUrl) {
+                        // URL正規化: 二重ドメインや不正なパスを修正
+                        let fullNextUrl;
+                        if (nextUrl.startsWith('http')) {
+                            fullNextUrl = nextUrl;
+                        }
+                        else if (nextUrl.startsWith('//')) {
+                            // プロトコル相対URL (//tenshoku.mynavi.jp/...)
+                            fullNextUrl = `https:${nextUrl}`;
+                        }
+                        else if (nextUrl.startsWith('/')) {
+                            // 絶対パス
+                            fullNextUrl = `https://tenshoku.mynavi.jp${nextUrl}`;
+                        }
+                        else {
+                            // 相対パス
+                            fullNextUrl = `https://tenshoku.mynavi.jp/${nextUrl}`;
+                        }
+                        currentSearchUrl = fullNextUrl;
+                        log(`Navigating to next page: ${currentSearchUrl}`);
+                        await page.goto(currentSearchUrl, { waitUntil: 'networkidle', timeout: 30000 });
+                        await page.waitForTimeout(randomDelay(3000, 5000));
+                    }
+                    else {
+                        // hrefがない場合はクリック
+                        await nextButton.click();
+                        await page.waitForLoadState('networkidle');
+                        await page.waitForTimeout(randomDelay(3000, 5000));
+                        currentSearchUrl = page.url();
+                    }
                 }
                 catch (error) {
                     log(`Error navigating to next page: ${error}`);
@@ -213,38 +316,108 @@ class MynaviStrategy {
         }
         log(`Completed scraping ${pageNum} pages`);
     }
+    // 複数のセレクターから最初に見つかったものを返す
+    async waitForAnySelector(page, selectors, timeout, log) {
+        const startTime = Date.now();
+        while (Date.now() - startTime < timeout) {
+            for (const selector of selectors) {
+                try {
+                    const count = await page.locator(selector).count();
+                    if (count > 0) {
+                        log(`Found ${count} elements with selector: ${selector}`);
+                        return selector;
+                    }
+                }
+                catch {
+                    // セレクターがエラーになる場合はスキップ
+                }
+            }
+            await page.waitForTimeout(500);
+        }
+        return null;
+    }
+    // デバッグ用：ページの主要要素情報を取得
+    async getPageDebugInfo(page) {
+        try {
+            return await page.evaluate(() => {
+                const info = [];
+                info.push(`URL: ${window.location.href}`);
+                info.push(`Title: ${document.title}`);
+                // 主要なclass名を収集
+                const classes = new Set();
+                document.querySelectorAll('*').forEach(el => {
+                    if (el.className && typeof el.className === 'string') {
+                        el.className.split(' ').slice(0, 3).forEach(c => {
+                            if (c && (c.includes('recruit') || c.includes('job') || c.includes('cassette') || c.includes('card') || c.includes('list'))) {
+                                classes.add(c);
+                            }
+                        });
+                    }
+                });
+                info.push(`Relevant classes: ${Array.from(classes).slice(0, 10).join(', ')}`);
+                return info.join(' | ');
+            });
+        }
+        catch {
+            return 'Could not get debug info';
+        }
+    }
     // 企業URLを抽出（複数箇所をチェック）
     async extractCompanyUrl(page) {
-        // 優先順位1: 企業ホームページリンク
-        const homepageLink = page.locator('a:has-text("企業ホームページ"), a:has-text("コーポレートサイト"), a[href*="http"]:has-text("HP")').first();
-        if (await homepageLink.count() > 0) {
-            const href = await homepageLink.getAttribute('href');
-            if (href && !href.includes('mynavi.jp')) {
-                return href;
+        // 優先順位1: 企業ホームページのテーブル行から取得
+        // HTMLの実際の構造: <th>企業ホームページ</th><td><a>https://example.com/</a></td>
+        // ※hrefはマイナビのリダイレクトURL、テキストが実際のURL
+        const homepageRow = page.locator('th.jobOfferTable__head:has-text("企業ホームページ")').first();
+        if (await homepageRow.count() > 0) {
+            const tdEl = homepageRow.locator('~ td').first();
+            if (await tdEl.count() > 0) {
+                const linkEl = tdEl.locator('a').first();
+                if (await linkEl.count() > 0) {
+                    // リンクのテキスト内容が実際のURL
+                    const urlText = (await linkEl.textContent())?.trim();
+                    if (urlText && urlText.startsWith('http')) {
+                        return urlText;
+                    }
+                }
             }
         }
-        // 優先順位2: 会社概要セクションのリンク
-        const companySection = page.locator('.companyData, .company-info, [class*="company"]');
+        // 優先順位2: 一般的な企業ホームページリンク
+        const homepageLink = page.locator('a:has-text("企業ホームページ"), a:has-text("コーポレートサイト")').first();
+        if (await homepageLink.count() > 0) {
+            // テキスト内容がURLの場合
+            const text = (await homepageLink.textContent())?.trim();
+            if (text && text.startsWith('http')) {
+                return text;
+            }
+        }
+        // 優先順位3: 会社概要セクションのリンク
+        const companySection = page.locator('.jobOfferTable, .companyData, .company-info');
         const links = await companySection.locator('a[href^="http"]').all();
         for (const link of links) {
-            const href = await link.getAttribute('href');
-            if (href && !href.includes('mynavi.jp') && !href.includes('javascript:')) {
-                return href;
+            const text = (await link.textContent())?.trim();
+            if (text && text.startsWith('http') && !text.includes('mynavi.jp')) {
+                return text;
             }
         }
         return undefined;
     }
     // テーブル形式のデータを抽出
     async extractTableValue(page, label) {
-        // dt/dd パターン
-        const dtEl = page.locator(`dt:has-text("${label}")`).first();
-        if (await dtEl.count() > 0) {
-            const ddEl = dtEl.locator('~ dd').first();
-            if (await ddEl.count() > 0) {
-                return (await ddEl.textContent())?.trim() || undefined;
+        // マイナビの実際の構造: th.jobOfferTable__head / td.jobOfferTable__body > div.text
+        const jobOfferTh = page.locator(`th.jobOfferTable__head:has-text("${label}")`).first();
+        if (await jobOfferTh.count() > 0) {
+            const tdEl = jobOfferTh.locator('~ td.jobOfferTable__body').first();
+            if (await tdEl.count() > 0) {
+                // div.text 内のテキストを取得
+                const textEl = tdEl.locator('.text').first();
+                if (await textEl.count() > 0) {
+                    return (await textEl.textContent())?.trim() || undefined;
+                }
+                // div.text がない場合は td 直下のテキスト
+                return (await tdEl.textContent())?.trim() || undefined;
             }
         }
-        // th/td パターン
+        // 一般的な th/td パターン
         const thEl = page.locator(`th:has-text("${label}")`).first();
         if (await thEl.count() > 0) {
             const tdEl = thEl.locator('~ td').first();
@@ -252,15 +425,12 @@ class MynaviStrategy {
                 return (await tdEl.textContent())?.trim() || undefined;
             }
         }
-        // ラベル: 値 パターン
-        const labelEl = page.locator(`text=/^${label}[：:]/`).first();
-        if (await labelEl.count() > 0) {
-            const text = await labelEl.textContent();
-            if (text) {
-                const match = text.match(new RegExp(`${label}[：:]\\s*(.+)`));
-                if (match) {
-                    return match[1].trim();
-                }
+        // dt/dd パターン
+        const dtEl = page.locator(`dt:has-text("${label}")`).first();
+        if (await dtEl.count() > 0) {
+            const ddEl = dtEl.locator('~ dd').first();
+            if (await ddEl.count() > 0) {
+                return (await ddEl.textContent())?.trim() || undefined;
             }
         }
         return undefined;

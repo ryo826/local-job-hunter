@@ -1,37 +1,4 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RikunabiStrategy = void 0;
 // ランダム待機時間のヘルパー関数
@@ -158,27 +125,7 @@ class RikunabiStrategy {
                     // 住所の正規化
                     const normalizedAddress = this.normalizeAddress(address);
                     const cleanName = this.cleanCompanyName(companyName);
-                    // Step 2: 企業URLがある場合は連絡先情報を抽出
-                    let contactInfo = {};
-                    let finalScrapeStatus = 'step1_completed';
-                    if (companyUrl) {
-                        try {
-                            log(`Step 2: Extracting contact info from ${companyUrl}`);
-                            const { ContactExtractor } = await Promise.resolve().then(() => __importStar(require('./contact-extractor')));
-                            const extractor = new ContactExtractor();
-                            contactInfo = await extractor.extract(page, companyUrl, onLog);
-                            if (contactInfo.phoneNumber || contactInfo.email) {
-                                finalScrapeStatus = 'step2_completed';
-                                log(`Step 2 completed: phone=${contactInfo.phoneNumber}, email=${contactInfo.email}`);
-                            }
-                            else {
-                                log('Step 2: No contact info found');
-                            }
-                        }
-                        catch (error) {
-                            log(`Step 2 error: ${error}`);
-                        }
-                    }
+                    // Note: 電話番号はGoogle Maps APIで後から取得するため、Step 2はスキップ
                     yield {
                         source: this.source,
                         url: fullUrl,
@@ -189,15 +136,13 @@ class RikunabiStrategy {
                         establishment,
                         employees,
                         revenue,
-                        phone: contactInfo.phoneNumber || phone,
-                        email: contactInfo.email,
+                        phone: phone, // 求人ページのテーブルから取得できた場合のみ
                         address: normalizedAddress,
                         area: this.extractAreaFromAddress(normalizedAddress),
                         homepage_url: companyUrl,
-                        contact_page_url: contactInfo.contactPageUrl,
                         industry,
                         job_description: jobDescription,
-                        scrape_status: finalScrapeStatus,
+                        scrape_status: 'step1_completed',
                     };
                     // リストページに戻る
                     await page.goBack({ waitUntil: 'networkidle' });
