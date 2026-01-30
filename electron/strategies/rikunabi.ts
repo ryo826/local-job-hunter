@@ -86,9 +86,30 @@ export class RikunabiStrategy implements ScrapingStrategy {
             // スクロールしてコンテンツ読み込み
             await this.scrollToBottom(page, log);
 
-            // 求人カードを取得 (CSS Modulesのハッシュ付きクラス名に対応)
-            const jobCards = await page.locator('[class*="styles_detailArea"], [class*="jobCard"], article').all();
-            log(`Found ${jobCards.length} job cards`);
+            // デバッグ: ページ上の主要な要素を確認
+            const bodyHTML = await page.evaluate(() => document.body.innerHTML.substring(0, 2000));
+            log(`Page HTML preview: ${bodyHTML.substring(0, 500)}...`);
+
+            // 求人カードを取得 (複数のセレクターを試行)
+            let jobCards = await page.locator('[class*="styles_detailArea"]').all();
+            log(`Selector [class*="styles_detailArea"]: ${jobCards.length} cards`);
+
+            if (jobCards.length === 0) {
+                jobCards = await page.locator('[class*="jobCard"]').all();
+                log(`Selector [class*="jobCard"]: ${jobCards.length} cards`);
+            }
+
+            if (jobCards.length === 0) {
+                jobCards = await page.locator('[data-size="default"]').all();
+                log(`Selector [data-size="default"]: ${jobCards.length} cards`);
+            }
+
+            if (jobCards.length === 0) {
+                jobCards = await page.locator('article').all();
+                log(`Selector article: ${jobCards.length} cards`);
+            }
+
+            log(`Found ${jobCards.length} job cards total`);
 
             if (jobCards.length === 0) {
                 log('No job cards found, stopping');
