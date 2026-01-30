@@ -150,7 +150,25 @@ export class MynaviStrategy implements ScrapingStrategy {
                         continue;
                     }
 
-                    const fullUrl = url.startsWith('http') ? url : `https://tenshoku.mynavi.jp${url}`;
+                    // URL正規化: 二重ドメインや不正なパスを修正
+                    let fullUrl: string;
+                    if (url.startsWith('http')) {
+                        fullUrl = url;
+                    } else if (url.startsWith('//')) {
+                        // プロトコル相対URL (//tenshoku.mynavi.jp/...)
+                        fullUrl = `https:${url}`;
+                    } else if (url.includes('tenshoku.mynavi.jp')) {
+                        // ドメインが含まれているが http:// がない場合
+                        const match = url.match(/tenshoku\.mynavi\.jp(\/.*)/);
+                        if (match) {
+                            fullUrl = `https://tenshoku.mynavi.jp${match[1]}`;
+                        } else {
+                            fullUrl = `https://${url.replace(/^\/+/, '')}`;
+                        }
+                    } else {
+                        // 相対パス
+                        fullUrl = `https://tenshoku.mynavi.jp${url.startsWith('/') ? '' : '/'}${url}`;
+                    }
 
                     // マイナビ以外のURLはスキップ
                     if (!fullUrl.includes('mynavi.jp')) {
