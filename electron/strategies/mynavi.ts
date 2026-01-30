@@ -170,6 +170,12 @@ export class MynaviStrategy implements ScrapingStrategy {
                         continue;
                     }
 
+                    // /msg/ URLを通常の詳細ページURLに変換
+                    // 例: /jobinfo-143434-1-104-1/msg/ → /jobinfo-143434-1-104-1/
+                    if (fullUrl.includes('/msg/')) {
+                        fullUrl = fullUrl.replace(/\/msg\/?$/, '/');
+                    }
+
                     // 会社名を取得
                     let companyName = '';
                     for (const nameSelector of COMPANY_NAME_SELECTORS) {

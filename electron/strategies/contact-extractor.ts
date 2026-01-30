@@ -13,7 +13,7 @@ export interface ContactInfo {
 
 export class ContactExtractor {
     private readonly REQUEST_INTERVAL = 2000; // 2秒
-    private readonly TIMEOUT = 30000; // 30秒タイムアウト
+    private readonly TIMEOUT = 10000; // 10秒タイムアウト（短縮）
 
     // 電話番号の正規表現パターン（優先度順）
     private readonly PHONE_PATTERNS = [
