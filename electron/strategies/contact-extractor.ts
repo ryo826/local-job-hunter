@@ -12,32 +12,78 @@ export interface ContactInfo {
 }
 
 export class ContactExtractor {
-    private readonly REQUEST_INTERVAL = 2000; // 2秒
-    private readonly TIMEOUT = 10000; // 10秒タイムアウト（短縮）
+    private readonly REQUEST_INTERVAL = 1500; // 1.5秒（高速化）
+    private readonly TIMEOUT = 15000; // 15秒タイムアウト（延長）
 
-    // 電話番号の正規表現パターン（優先度順）
+    // 電話番号の正規表現パターン（優先度順・拡張版）
     private readonly PHONE_PATTERNS = [
-        /0\d{1,4}-\d{1,4}-\d{4}/g,           // 0X-XXXX-XXXX
-        /0\d{9,10}/g,                        // 0XXXXXXXXX（ハイフンなし）
-        /\(0\d{1,4}\)\d{1,4}-\d{4}/g,       // (0X)XXXX-XXXX
-        /TEL[:\s]*0\d{1,4}-\d{1,4}-\d{4}/gi // TEL: 0X-XXXX-XXXX
+        // ハイフン区切り
+        /0\d{1,4}-\d{1,4}-\d{4}/g,
+        // ハイフンなし10-11桁
+        /(?<![0-9])0\d{9,10}(?![0-9])/g,
+        // カッコ区切り (0X)XXXX-XXXX
+        /\(0\d{1,4}\)\s*\d{1,4}-\d{4}/g,
+        // スペース区切り
+        /0\d{1,4}\s+\d{1,4}\s+\d{4}/g,
+        // TEL:プレフィックス付き
+        /TEL[:\s：]*0\d{1,4}[-\s]?\d{1,4}[-\s]?\d{4}/gi,
+        /電話[:\s：]*0\d{1,4}[-\s]?\d{1,4}[-\s]?\d{4}/gi,
+        // 全角数字（変換して処理）
+        /０\d{1,4}[ー－-]\d{1,4}[ー－-]\d{4}/g,
     ];
 
     // メールアドレスの正規表現パターン
     private readonly EMAIL_PATTERNS = [
         /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
-        /[a-zA-Z0-9._%+-]+\[at\][a-zA-Z0-9.-]+\[dot\][a-zA-Z]{2,}/g  // スパム対策形式
+        /[a-zA-Z0-9._%+-]+\[at\][a-zA-Z0-9.-]+\[dot\][a-zA-Z]{2,}/g
     ];
 
-    // 優先的にチェックするセレクタ
+    // 優先的にチェックするセレクタ（拡張版）
     private readonly TARGET_SELECTORS = [
-        'footer',
+        // 会社情報セクション
         '.company-info',
+        '.companyInfo',
+        '[class*="company"]',
+        '[class*="corporate"]',
+        // お問い合わせ・連絡先
         '.contact',
-        '[class*="about"]',
-        'address',
+        '[class*="contact"]',
+        '[class*="inquiry"]',
+        // フッター
+        'footer',
         '[class*="footer"]',
-        '[class*="company"]'
+        // テーブル（会社概要でよく使われる）
+        'table',
+        // 定義リスト（会社情報でよく使われる）
+        'dl',
+        // アドレス要素
+        'address',
+        // その他
+        '[class*="about"]',
+        '[class*="access"]',
+        '[class*="profile"]',
+        '.overview',
+        '#company',
+        '#access',
+    ];
+
+    // 日本の企業サイトでよく使われるURLパス（拡張版）
+    private readonly PAGE_PATHS = [
+        { path: '/company/', name: '会社概要' },
+        { path: '/corporate/', name: '企業情報' },
+        { path: '/about/', name: 'About' },
+        { path: '/aboutus/', name: 'About Us' },
+        { path: '/profile/', name: 'プロフィール' },
+        { path: '/outline/', name: '概要' },
+        { path: '/info/', name: '情報' },
+        { path: '/access/', name: 'アクセス' },
+        { path: '/contact/', name: 'お問い合わせ' },
+        { path: '/inquiry/', name: 'お問い合わせ' },
+        { path: '/company/outline/', name: '会社概要' },
+        { path: '/company/profile/', name: '会社プロフィール' },
+        { path: '/company/access/', name: '会社アクセス' },
+        { path: '/corporate/profile/', name: '企業プロフィール' },
+        { path: '/corporate/outline/', name: '企業概要' },
     ];
 
     /**
@@ -52,59 +98,78 @@ export class ContactExtractor {
         const result: ContactInfo = {};
 
         try {
-            // 優先ページを順番に探索
-            const pagesToCheck = [
-                { url: this.buildUrl(companyUrl, '/company/'), name: '会社概要' },
-                { url: this.buildUrl(companyUrl, '/about/'), name: 'About' },
-                { url: this.buildUrl(companyUrl, '/contact/'), name: 'お問い合わせ' },
-                { url: companyUrl, name: 'トップページ' }
-            ];
+            // まずトップページをチェック（多くの場合フッターに電話番号がある）
+            try {
+                log(`Checking トップページ: ${companyUrl}`);
+                await page.goto(companyUrl, { waitUntil: 'domcontentloaded', timeout: this.TIMEOUT });
+                await page.waitForTimeout(randomDelay(500, 1000));
 
-            for (const pageInfo of pagesToCheck) {
-                try {
-                    log(`Checking ${pageInfo.name}: ${pageInfo.url}`);
-                    await page.goto(pageInfo.url, { waitUntil: 'networkidle', timeout: this.TIMEOUT });
-                    await page.waitForTimeout(randomDelay(1000, 2000));
-
-                    // 404チェック
-                    const is404 = await page.locator('text=/404|ページが見つかりません|not found/i').count() > 0;
-                    if (is404) {
-                        log(`404 detected, skipping ${pageInfo.name}`);
-                        continue;
+                // 404チェック
+                const is404Top = await this.check404(page);
+                if (!is404Top) {
+                    result.phoneNumber = await this.extractPhoneNumber(page, log);
+                    if (result.phoneNumber) {
+                        log(`Found phone on top page: ${result.phoneNumber}`);
                     }
-
-                    // 電話番号を抽出
-                    if (!result.phoneNumber) {
-                        result.phoneNumber = await this.extractPhoneNumber(page, log);
-                        if (result.phoneNumber) {
-                            log(`Found phone: ${result.phoneNumber}`);
-                        }
+                    result.email = await this.extractEmail(page, log);
+                    if (result.email) {
+                        log(`Found email on top page: ${result.email}`);
                     }
+                }
+            } catch (error) {
+                log(`Error checking top page: ${error}`);
+            }
 
-                    // メールアドレスを抽出
-                    if (!result.email) {
-                        result.email = await this.extractEmail(page, log);
-                        if (result.email) {
-                            log(`Found email: ${result.email}`);
-                        }
-                    }
-
-                    // お問い合わせページURLを記録
-                    if (pageInfo.name === 'お問い合わせ' && !is404) {
-                        result.contactPageUrl = pageInfo.url;
-                    }
-
-                    // 両方見つかったら終了
+            // 電話番号が見つかっていない場合、他のページをチェック
+            if (!result.phoneNumber) {
+                for (const pageInfo of this.PAGE_PATHS) {
+                    // 既に見つかったら終了
                     if (result.phoneNumber && result.email) {
-                        log('Both phone and email found, stopping search');
                         break;
                     }
 
-                    await page.waitForTimeout(this.REQUEST_INTERVAL);
+                    const pageUrl = this.buildUrl(companyUrl, pageInfo.path);
 
-                } catch (error) {
-                    log(`Error checking ${pageInfo.name}: ${error}`);
-                    continue;
+                    try {
+                        log(`Checking ${pageInfo.name}: ${pageUrl}`);
+                        await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: this.TIMEOUT });
+                        await page.waitForTimeout(randomDelay(300, 700));
+
+                        // 404チェック
+                        const is404 = await this.check404(page);
+                        if (is404) {
+                            continue;
+                        }
+
+                        // 電話番号を抽出
+                        if (!result.phoneNumber) {
+                            const phone = await this.extractPhoneNumber(page, log);
+                            if (phone) {
+                                result.phoneNumber = phone;
+                                log(`Found phone: ${phone}`);
+                            }
+                        }
+
+                        // メールアドレスを抽出
+                        if (!result.email) {
+                            const email = await this.extractEmail(page, log);
+                            if (email) {
+                                result.email = email;
+                                log(`Found email: ${email}`);
+                            }
+                        }
+
+                        // お問い合わせページURLを記録
+                        if ((pageInfo.name === 'お問い合わせ' || pageInfo.path.includes('contact') || pageInfo.path.includes('inquiry')) && !result.contactPageUrl) {
+                            result.contactPageUrl = pageUrl;
+                        }
+
+                        await page.waitForTimeout(this.REQUEST_INTERVAL);
+
+                    } catch (error) {
+                        // タイムアウトやナビゲーションエラーは静かにスキップ
+                        continue;
+                    }
                 }
             }
 
@@ -116,26 +181,65 @@ export class ContactExtractor {
     }
 
     /**
-     * 電話番号を抽出
+     * 404ページかどうかをチェック
+     */
+    private async check404(page: Page): Promise<boolean> {
+        try {
+            // URLのステータスコードをチェック（可能な場合）
+            const title = await page.title();
+            if (/404|not found|ページが見つかりません/i.test(title)) {
+                return true;
+            }
+
+            // ページ内のテキストをチェック
+            const body = await page.locator('body').first();
+            const text = await body.textContent();
+            if (text && text.length < 500) {
+                // 短いページで404関連テキストがある場合
+                if (/404|not found|ページが見つかりません|お探しのページ|存在しません/i.test(text)) {
+                    return true;
+                }
+            }
+
+            return false;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * 電話番号を抽出（改良版）
      */
     private async extractPhoneNumber(page: Page, log: (msg: string) => void): Promise<string | undefined> {
         try {
             // 優先セクションからテキストを取得
             let textToSearch = '';
+
             for (const selector of this.TARGET_SELECTORS) {
-                const elements = await page.locator(selector).all();
-                for (const el of elements) {
-                    const text = await el.textContent();
-                    if (text) {
-                        textToSearch += text + '\n';
+                try {
+                    const elements = await page.locator(selector).all();
+                    for (const el of elements) {
+                        const text = await el.textContent();
+                        if (text) {
+                            textToSearch += text + '\n';
+                        }
                     }
+                } catch {
+                    continue;
                 }
             }
 
             // フォールバック: ページ全体のテキスト
-            if (!textToSearch) {
-                textToSearch = await page.evaluate(() => document.body.innerText);
+            if (textToSearch.length < 100) {
+                try {
+                    textToSearch = await page.evaluate(() => document.body.innerText);
+                } catch {
+                    return undefined;
+                }
             }
+
+            // 全角数字を半角に変換
+            textToSearch = this.normalizeNumbers(textToSearch);
 
             // パターンマッチング
             const phones: string[] = [];
@@ -150,15 +254,20 @@ export class ContactExtractor {
                 return undefined;
             }
 
-            // フィルタリングと優先順位付け
+            // フィルタリングと正規化
             const filtered = phones
-                .map(p => p.replace(/TEL[:\s]*/gi, '').trim())
+                .map(p => this.normalizePhoneNumber(p))
                 .filter(p => {
                     // 0570（ナビダイヤル）を除外
-                    if (p.startsWith('0570') || p.startsWith('0-570')) {
+                    if (p.startsWith('0570')) {
                         return false;
                     }
-                    // FAX番号を除外（FAXというテキストが近くにある場合）
+                    // 0800（フリーダイヤル）は含める
+                    // 桁数チェック（ハイフン除去後10-11桁）
+                    const digits = p.replace(/\D/g, '');
+                    if (digits.length < 10 || digits.length > 11) {
+                        return false;
+                    }
                     return true;
                 });
 
@@ -166,30 +275,70 @@ export class ContactExtractor {
                 return undefined;
             }
 
-            // 0120（フリーダイヤル）を優先
-            const freeDial = filtered.find(p => p.startsWith('0120') || p.startsWith('0-120'));
+            // 重複除去
+            const unique = [...new Set(filtered)];
+
+            // 優先順位付け
+            // 1. 0120/0800（フリーダイヤル）を優先
+            const freeDial = unique.find(p => p.startsWith('0120') || p.startsWith('0800'));
             if (freeDial) {
                 return freeDial;
             }
 
-            // 「代表」「本社」などのキーワード近辺の番号を優先
-            for (const phone of filtered) {
+            // 2. 「代表」「本社」などのキーワード近辺の番号を優先
+            for (const phone of unique) {
                 const index = textToSearch.indexOf(phone);
                 if (index !== -1) {
-                    const context = textToSearch.substring(Math.max(0, index - 50), index + 50);
-                    if (/代表|本社|お問い合わせ|電話番号/i.test(context)) {
+                    const context = textToSearch.substring(Math.max(0, index - 100), index + phone.length + 50);
+                    if (/代表|本社|お問い合わせ|電話番号|TEL|連絡先|総務|受付/i.test(context)) {
+                        // FAXでないことを確認
+                        if (!/FAX/i.test(context.substring(context.indexOf(phone) - 20, context.indexOf(phone)))) {
+                            return phone;
+                        }
+                    }
+                }
+            }
+
+            // 3. 最初に見つかった番号を返す（FAXっぽくないもの）
+            for (const phone of unique) {
+                const index = textToSearch.indexOf(phone);
+                if (index !== -1) {
+                    const context = textToSearch.substring(Math.max(0, index - 30), index);
+                    if (!/FAX|ファックス|ＦＡＸ/i.test(context)) {
                         return phone;
                     }
                 }
             }
 
-            // 最初に見つかった番号を返す
-            return filtered[0];
+            // 4. どうしても見つからなければ最初のもの
+            return unique[0];
 
         } catch (error) {
             log(`Error extracting phone: ${error}`);
             return undefined;
         }
+    }
+
+    /**
+     * 電話番号を正規化
+     */
+    private normalizePhoneNumber(phone: string): string {
+        return phone
+            .replace(/TEL[:\s：]*/gi, '')
+            .replace(/電話[:\s：]*/gi, '')
+            .replace(/[ー－]/g, '-')
+            .replace(/\s+/g, '-')
+            .replace(/--+/g, '-')
+            .trim();
+    }
+
+    /**
+     * 全角数字を半角に変換
+     */
+    private normalizeNumbers(text: string): string {
+        return text.replace(/[０-９]/g, (char) => {
+            return String.fromCharCode(char.charCodeAt(0) - 0xFEE0);
+        });
     }
 
     /**
@@ -209,26 +358,15 @@ export class ContactExtractor {
                 }
             }
 
-            // 2. お問い合わせページのリンクをチェック
-            const contactLinks = await page.locator('a[href*="contact"]').all();
-            for (const link of contactLinks.slice(0, 3)) { // 最初の3つだけチェック
+            // 2. テキストコンテンツから抽出
+            let textToSearch = '';
+            for (const selector of this.TARGET_SELECTORS) {
                 try {
-                    const href = await link.getAttribute('href');
-                    if (href && !href.startsWith('javascript:')) {
-                        const fullUrl = href.startsWith('http') ? href : new URL(href, page.url()).href;
-                        await page.goto(fullUrl, { waitUntil: 'networkidle', timeout: this.TIMEOUT });
-                        await page.waitForTimeout(1000);
-
-                        // mailto:リンクを再度チェック
-                        const contactMailtoLinks = await page.locator('a[href^="mailto:"]').all();
-                        if (contactMailtoLinks.length > 0) {
-                            const contactHref = await contactMailtoLinks[0].getAttribute('href');
-                            if (contactHref) {
-                                const email = contactHref.replace('mailto:', '').split('?')[0];
-                                if (this.isValidEmail(email)) {
-                                    return email;
-                                }
-                            }
+                    const elements = await page.locator(selector).all();
+                    for (const el of elements) {
+                        const text = await el.textContent();
+                        if (text) {
+                            textToSearch += text + '\n';
                         }
                     }
                 } catch {
@@ -236,21 +374,13 @@ export class ContactExtractor {
                 }
             }
 
-            // 3. テキストコンテンツから抽出
-            let textToSearch = '';
-            for (const selector of this.TARGET_SELECTORS) {
-                const elements = await page.locator(selector).all();
-                for (const el of elements) {
-                    const text = await el.textContent();
-                    if (text) {
-                        textToSearch += text + '\n';
-                    }
-                }
-            }
-
             // フォールバック: ページ全体のテキスト
-            if (!textToSearch) {
-                textToSearch = await page.evaluate(() => document.body.innerText);
+            if (textToSearch.length < 100) {
+                try {
+                    textToSearch = await page.evaluate(() => document.body.innerText);
+                } catch {
+                    return undefined;
+                }
             }
 
             // パターンマッチング
@@ -291,7 +421,7 @@ export class ContactExtractor {
 
             // info@, contact@, sales@ を優先
             const priority = filtered.find(email =>
-                /^(info|contact|sales)@/i.test(email)
+                /^(info|contact|sales|support)@/i.test(email)
             );
             if (priority) {
                 return priority;
@@ -313,6 +443,7 @@ export class ContactExtractor {
         try {
             const url = new URL(baseUrl);
             url.pathname = path;
+            url.search = ''; // クエリパラメータを除去
             return url.href;
         } catch {
             return baseUrl + path;
