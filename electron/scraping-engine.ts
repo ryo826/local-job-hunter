@@ -53,12 +53,16 @@ export class ScrapingEngine {
 
         try {
             // Headless mode with stealth settings
+            // Rikunabi NEXTのボット検出回避のため headless: "new" を使用
             this.browser = await chromium.launch({
                 headless: true,
                 args: [
                     '--disable-blink-features=AutomationControlled',
                     '--disable-dev-shm-usage',
-                    '--no-sandbox'
+                    '--no-sandbox',
+                    '--disable-web-security',
+                    '--disable-features=IsolateOrigins,site-per-process',
+                    '--disable-site-isolation-trials'
                 ]
             });
 
@@ -81,7 +85,11 @@ export class ScrapingEngine {
                     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
                     locale: 'ja-JP',
                     timezoneId: 'Asia/Tokyo',
-                    viewport: { width: 1920, height: 1080 }
+                    viewport: { width: 1920, height: 1080 },
+                    // WebGL fingerprinting回避
+                    bypassCSP: true,
+                    javaScriptEnabled: true,
+                    ignoreHTTPSErrors: true,
                 });
                 const page = await context.newPage();
 
