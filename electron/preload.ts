@@ -56,10 +56,6 @@ const electronAPI = {
         updateCompany: (id: number, updates: Partial<Company>): Promise<{ success: boolean }> =>
             ipcRenderer.invoke('db:updateCompany', id, updates),
     },
-    ai: {
-        analyze: (id: number): Promise<{ success: boolean; data?: { summary: string; tags: string[] }; error?: string }> =>
-            ipcRenderer.invoke('ai:analyze', id),
-    },
     scraper: {
         start: (options: ScrapingOptions): Promise<{ success: boolean; error?: string }> =>
             ipcRenderer.invoke('scraper:start', options),

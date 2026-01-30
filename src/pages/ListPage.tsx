@@ -18,7 +18,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { ExternalLink, Sparkles, Eye, Phone, FileText, Search } from 'lucide-react';
+import { ExternalLink, Eye, Phone, FileText, Search } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { ngWords } from '@/config/settings';
 import type { Company } from '@/types';
@@ -32,7 +32,6 @@ export function ListPage() {
     const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
     const [detailCompany, setDetailCompany] = useState<Company | null>(null);
     const [isDetailOpen, setIsDetailOpen] = useState(false);
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
 
     useEffect(() => {
         fetchCompanies();
@@ -109,37 +108,8 @@ export function ListPage() {
         }
     };
 
-    const handleAnalyze = async () => {
-        if (!detailCompany) return;
-        setIsAnalyzing(true);
-        try {
-            const result = await window.electronAPI.ai.analyze(detailCompany.id);
-            if (result.success && result.data) {
-                setDetailCompany({
-                    ...detailCompany,
-                    ai_summary: result.data.summary,
-                    ai_tags: JSON.stringify(result.data.tags),
-                });
-                fetchCompanies();
-            }
-        } catch (error) {
-            console.error('AI analysis failed:', error);
-        } finally {
-            setIsAnalyzing(false);
-        }
-    };
-
     const openGoogleSearch = (companyName: string) => {
         window.open(`https://www.google.com/search?q=${encodeURIComponent(companyName)}`, '_blank');
-    };
-
-    const parseTags = (tags: string | null): string[] => {
-        if (!tags) return [];
-        try {
-            return JSON.parse(tags);
-        } catch {
-            return [];
-        }
     };
 
     return (
@@ -358,18 +328,7 @@ export function ListPage() {
             <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
                 <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle className="flex items-center justify-between">
-                            <span>{detailCompany?.company_name}</span>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={handleAnalyze}
-                                disabled={isAnalyzing}
-                            >
-                                <Sparkles className="h-4 w-4 mr-2" />
-                                {isAnalyzing ? '分析中...' : 'AI分析'}
-                            </Button>
-                        </DialogTitle>
+                        <DialogTitle>{detailCompany?.company_name}</DialogTitle>
                         <DialogDescription>
                             {detailCompany && getSourceBadge(detailCompany.source)} からスクレイピング
                         </DialogDescription>
@@ -377,22 +336,6 @@ export function ListPage() {
 
                     {detailCompany && (
                         <div className="space-y-4 pt-4 text-sm">
-                            {/* AI Summary */}
-                            {detailCompany.ai_summary && (
-                                <Card className="p-4 bg-blue-50 dark:bg-blue-950/30">
-                                    <h3 className="font-semibold mb-2 flex items-center gap-2">
-                                        <Sparkles className="h-4 w-4 text-blue-600" />
-                                        AI要約
-                                    </h3>
-                                    <p>{detailCompany.ai_summary}</p>
-                                    <div className="flex flex-wrap gap-1 mt-2">
-                                        {parseTags(detailCompany.ai_tags).map((tag, i) => (
-                                            <Badge key={i} variant="secondary">{tag}</Badge>
-                                        ))}
-                                    </div>
-                                </Card>
-                            )}
-
                             {/* 基本情報 */}
                             <section>
                                 <h4 className="font-semibold mb-2 border-b pb-1">基本情報</h4>
