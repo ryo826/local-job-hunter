@@ -1,0 +1,227 @@
+import { chromium, Browser, Page } from 'playwright';
+import { companyRepository } from './database';
+import { ScrapingStrategy, ScrapingParams, CompanyData } from './strategies/ScrapingStrategy';
+import { JobRepository } from './repositories/JobRepository';
+import { ScrapingLogRepository } from './repositories/ScrapingLogRepository';
+import { UpsertService } from './services/UpsertService';
+import { DataConverter } from './services/DataConverter';
+import Database from 'better-sqlite3';
+import path from 'path';
+import { app } from 'electron';
+
+export interface ScrapingProgress {
+    current: number;
+    total: number;
+    status: string;
+    source: string;
+    newCount: number;
+    duplicateCount: number;
+}
+
+const SMART_STOP_THRESHOLD = 50;
+const TIMEOUT_MS = 60 * 60 * 1000; // 60 min
+
+export class ScrapingEngine {
+    private browser: Browser | null = null;
+    private isRunning = false;
+    private shouldStop = false;
+    private db: Database.Database;
+    private jobRepo: JobRepository;
+    private logRepo: ScrapingLogRepository;
+    private upsertService: UpsertService;
+
+    constructor() {
+        // データベース接続を初期化
+        const dbPath = path.join(app.getPath('userData'), 'companies.db');
+        this.db = new Database(dbPath);
+        this.jobRepo = new JobRepository(this.db);
+        this.logRepo = new ScrapingLogRepository(this.db);
+        this.upsertService = new UpsertService(this.db);
+    }
+
+    async start(
+        options: { sources: string[]; keywords?: string; location?: string },
+        onProgress: (progress: ScrapingProgress) => void,
+        onLog?: (message: string) => void
+    ): Promise<{ success: boolean; error?: string }> {
+        if (this.isRunning) {
+            return { success: false, error: 'Scraping already in progress' };
+        }
+
+        this.isRunning = true;
+        this.shouldStop = false;
+
+        try {
+            // Headless mode with stealth settings
+            this.browser = await chromium.launch({
+                headless: true,
+                args: [
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-dev-shm-usage',
+                    '--no-sandbox'
+                ]
+            });
+
+            const strategies = this.loadStrategies(options.sources);
+            const params: ScrapingParams = {
+                keywords: options.keywords,
+                location: options.location,
+            };
+
+            for (const strategy of strategies) {
+                if (this.shouldStop) break;
+
+                const startTime = Date.now();
+                let jobsFound = 0;
+                let newJobs = 0;
+                let updatedJobs = 0;
+                let errors = 0;
+
+                const context = await this.browser.newContext({
+                    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                    locale: 'ja-JP',
+                    timezoneId: 'Asia/Tokyo',
+                    viewport: { width: 1920, height: 1080 }
+                });
+                const page = await context.newPage();
+
+                // Login if needed
+                if (strategy.login) {
+                    onProgress({
+                        current: 0, total: 0, newCount: 0, duplicateCount: 0,
+                        source: strategy.source,
+                        status: 'ログイン確認中...'
+                    });
+                    await strategy.login(page);
+                }
+
+                let consecutiveDuplicates = 0;
+                let newCount = 0;
+                let duplicateCount = 0;
+                let current = 0;
+
+                try {
+                    const log = (msg: string) => {
+                        console.log(`[${strategy.source}] ${msg}`);
+                        onLog?.(`[${strategy.source}] ${msg}`);
+                    };
+
+                    for await (const company of strategy.scrape(page, params, log)) {
+                        if (this.shouldStop) break;
+                        current++;
+                        jobsFound++;
+
+                        const uniqueKey = company.url;
+                        const exists = companyRepository.exists(uniqueKey);
+
+                        if (exists) {
+                            consecutiveDuplicates++;
+                            duplicateCount++;
+
+                            if (consecutiveDuplicates >= SMART_STOP_THRESHOLD) {
+                                onProgress({
+                                    current, total: current, newCount, duplicateCount,
+                                    source: strategy.source,
+                                    status: `Smart Stop: 連続${SMART_STOP_THRESHOLD}件の重複を検出 (停止)`
+                                });
+                                break;
+                            }
+                        } else {
+                            consecutiveDuplicates = 0;
+                            newCount++;
+                        }
+
+                        // 既存: CompanyDataとして保存(B2B営業用)
+                        companyRepository.safeUpsert(company as any);
+
+                        // 新規: Job型に変換して保存(求人情報管理用)
+                        try {
+                            const job = DataConverter.companyDataToJob(company);
+                            const isNew = this.upsertService.upsert(job);
+
+                            if (isNew) {
+                                newJobs++;
+                            } else {
+                                updatedJobs++;
+                            }
+                        } catch (error) {
+                            console.error(`Failed to convert/save job:`, error);
+                            errors++;
+                        }
+
+                        onProgress({
+                            current, total: current, newCount, duplicateCount,
+                            source: strategy.source,
+                            status: 'スクレイピング中...'
+                        });
+                    }
+                } catch (e: any) {
+                    console.error(`Error in strategy ${strategy.source}:`, e);
+                    errors++;
+                    onProgress({
+                        current, total: current, newCount, duplicateCount,
+                        source: strategy.source,
+                        status: `エラー発生: ${e.message}`
+                    });
+                } finally {
+                    await page.close();
+                    await context.close();
+
+                    // スクレイピングログを記録
+                    const durationMs = Date.now() - startTime;
+                    this.logRepo.insert({
+                        scrapeType: 'full',
+                        source: strategy.source as 'mynavi' | 'doda' | 'rikunabi',
+                        status: errors > jobsFound * 0.5 ? 'partial' : 'success',
+                        jobsFound,
+                        newJobs,
+                        updatedJobs,
+                        errors,
+                        errorMessage: errors > 0 ? `${errors} errors occurred` : undefined,
+                        durationMs,
+                        scrapedAt: new Date().toISOString()
+                    });
+                }
+
+                if (this.shouldStop) break;
+            }
+
+            return { success: true };
+
+        } catch (error: any) {
+            console.error('Scraping fatal error:', error);
+            return { success: false, error: error.message };
+        } finally {
+            if (this.browser) {
+                await this.browser.close();
+                this.browser = null;
+            }
+            this.isRunning = false;
+        }
+    }
+
+    async stop(): Promise<void> {
+        this.shouldStop = true;
+    }
+
+    private loadStrategies(sources: string[]): ScrapingStrategy[] {
+        const strategies: ScrapingStrategy[] = [];
+        for (const source of sources) {
+            try {
+                if (source === 'mynavi') {
+                    const { MynaviStrategy } = require('./strategies/mynavi');
+                    strategies.push(new MynaviStrategy());
+                } else if (source === 'rikunabi') {
+                    const { RikunabiStrategy } = require('./strategies/rikunabi');
+                    strategies.push(new RikunabiStrategy());
+                } else if (source === 'doda') {
+                    const { DodaStrategy } = require('./strategies/doda');
+                    strategies.push(new DodaStrategy());
+                }
+            } catch (e) {
+                console.error(`Failed to load strategy: ${source}`, e);
+            }
+        }
+        return strategies;
+    }
+}
