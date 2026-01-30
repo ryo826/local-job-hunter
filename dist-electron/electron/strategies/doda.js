@@ -135,8 +135,7 @@ class DodaStrategy {
                     if (await companyTabLink.count() > 0) {
                         try {
                             await companyTabLink.click();
-                            await page.waitForLoadState('networkidle');
-                            await page.waitForTimeout(randomDelay(1500, 3000));
+                            await page.waitForTimeout(randomDelay(2000, 4000));
                         }
                         catch (error) {
                             log(`Could not click company tab: ${error}`);
@@ -211,8 +210,7 @@ class DodaStrategy {
             if (await nextButton.count() > 0 && await nextButton.isVisible()) {
                 try {
                     await nextButton.click();
-                    await page.waitForLoadState('networkidle');
-                    await page.waitForTimeout(randomDelay(3000, 5000));
+                    await page.waitForTimeout(randomDelay(4000, 6000));
                 }
                 catch (error) {
                     log(`Error navigating to next page: ${error}`);
