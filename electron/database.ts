@@ -3,13 +3,24 @@ import path from 'path';
 import { app } from 'electron';
 import type { Company, CompanyFilters } from '../src/types';
 
-const dbPath = path.join(app.getPath('userData'), 'companies.db');
-const db = new Database(dbPath);
+// 遅延初期化: app.whenReady()の後にのみデータベースを作成
+let db: Database.Database | null = null;
+let dbPath: string | null = null;
+
+function getDb(): Database.Database {
+    if (!db) {
+        dbPath = path.join(app.getPath('userData'), 'companies.db');
+        db = new Database(dbPath);
+        console.log(`[Database] Connected to: ${dbPath}`);
+    }
+    return db;
+}
 
 // Initialize DB
 export function initDB() {
+    const database = getDb();
     // 既存の企業テーブル(B2B営業用)
-    db.exec(`
+    database.exec(`
     CREATE TABLE IF NOT EXISTS companies (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       company_name TEXT NOT NULL,
@@ -138,6 +149,7 @@ export function initDB() {
 // Repository Functions
 export const companyRepository = {
     getAll: (filters: CompanyFilters): Company[] => {
+        const database = getDb();
         let query = 'SELECT * FROM companies WHERE 1=1';
         const params: any[] = [];
 
@@ -156,21 +168,23 @@ export const companyRepository = {
 
         query += ' ORDER BY created_at DESC';
 
-        return db.prepare(query).all(...params) as Company[];
+        return database.prepare(query).all(...params) as Company[];
     },
 
     getById: (id: number): Company | null => {
-        return db.prepare('SELECT * FROM companies WHERE id = ?').get(id) as Company | null;
+        const database = getDb();
+        return database.prepare('SELECT * FROM companies WHERE id = ?').get(id) as Company | null;
     },
 
     update: (id: number, updates: Partial<Company>) => {
+        const database = getDb();
         const keys = Object.keys(updates).filter((key) => key !== 'id');
         if (keys.length === 0) return;
 
         const setClause = keys.map((key) => `${key} = ?`).join(', ');
         const values = keys.map((key) => (updates as any)[key]);
 
-        db.prepare(`UPDATE companies SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
+        database.prepare(`UPDATE companies SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
             ...values,
             id
         );
@@ -179,9 +193,10 @@ export const companyRepository = {
     // Safe Upsert for B Rollar
     // 既存データがある場合、PROTECTEDフィールドは更新しない
     safeUpsert: (company: Partial<Company>) => {
+        const database = getDb();
         if (!company.url || !company.company_name) return;
 
-        const existing = db.prepare('SELECT * FROM companies WHERE url = ?').get(company.url) as Company | undefined;
+        const existing = database.prepare('SELECT * FROM companies WHERE url = ?').get(company.url) as Company | undefined;
 
         if (!existing) {
             // INSERT
@@ -220,7 +235,7 @@ export const companyRepository = {
             const values = Object.values(insertData);
 
             try {
-                db.prepare(`INSERT INTO companies (${columns}) VALUES (${placeholders})`).run(...values);
+                database.prepare(`INSERT INTO companies (${columns}) VALUES (${placeholders})`).run(...values);
                 return { isNew: true };
             } catch (e) {
                 console.error('Insert failed', e);
@@ -256,14 +271,15 @@ export const companyRepository = {
             if (keys.length > 0) {
                 const setClause = keys.map((k) => `${k} = ?`).join(', ');
                 const values = keys.map((k) => (updateFields as any)[k]);
-                db.prepare(`UPDATE companies SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values, existing.id);
+                database.prepare(`UPDATE companies SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values, existing.id);
             }
             return { isNew: false };
         }
     },
 
     exists: (url: string): boolean => {
-        const result = db.prepare('SELECT 1 FROM companies WHERE url = ?').get(url);
+        const database = getDb();
+        const result = database.prepare('SELECT 1 FROM companies WHERE url = ?').get(url);
         return !!result;
     }
 };
