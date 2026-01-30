@@ -18,7 +18,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { ExternalLink, Eye } from 'lucide-react';
+import { ExternalLink, Eye, Phone, Loader2 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { ngWords } from '@/config/settings';
 import type { Company } from '@/types';
@@ -33,9 +33,52 @@ export function ListPage() {
     const [detailCompany, setDetailCompany] = useState<Company | null>(null);
     const [isDetailOpen, setIsDetailOpen] = useState(false);
 
+    // Phone enrichment state
+    const [isEnriching, setIsEnriching] = useState(false);
+    const [enrichProgress, setEnrichProgress] = useState<{ current: number; total: number; companyName: string } | null>(null);
+    const [enrichStats, setEnrichStats] = useState<{ withPhone: number; withoutPhone: number } | null>(null);
+
     useEffect(() => {
         fetchCompanies();
+        loadEnrichStats();
     }, []);
+
+    // Load phone enrichment stats
+    const loadEnrichStats = async () => {
+        const stats = await window.electronAPI.enrich.getStats();
+        setEnrichStats({ withPhone: stats.withPhone, withoutPhone: stats.withoutPhone });
+    };
+
+    // Handle phone number lookup via Google Maps API
+    const handlePhoneLookup = async () => {
+        if (isEnriching) return;
+
+        setIsEnriching(true);
+        setEnrichProgress(null);
+
+        // Set up progress listener
+        window.electronAPI.enrich.onProgress((progress) => {
+            setEnrichProgress(progress);
+        });
+
+        try {
+            const result = await window.electronAPI.enrich.startPhoneLookup();
+
+            if (result.success) {
+                alert(`電話番号取得完了: ${result.updated}/${result.total} 件更新`);
+                fetchCompanies();
+                loadEnrichStats();
+            } else {
+                alert(`エラー: ${result.error}`);
+            }
+        } catch (error) {
+            alert(`エラー: ${error}`);
+        } finally {
+            setIsEnriching(false);
+            setEnrichProgress(null);
+            window.electronAPI.enrich.offProgress();
+        }
+    };
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -114,11 +157,39 @@ export function ListPage() {
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-xl font-bold">企業リスト</h1>
-                    <p className="text-sm text-muted-foreground">全 {companies.length} 件</p>
+                    <p className="text-sm text-muted-foreground">
+                        全 {companies.length} 件
+                        {enrichStats && (
+                            <span className="ml-2">
+                                (電話あり: {enrichStats.withPhone} / なし: {enrichStats.withoutPhone})
+                            </span>
+                        )}
+                    </p>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => fetchCompanies()}>
-                    更新
-                </Button>
+                <div className="flex gap-2">
+                    <Button
+                        variant="default"
+                        size="sm"
+                        onClick={handlePhoneLookup}
+                        disabled={isEnriching || (enrichStats?.withoutPhone === 0)}
+                        className="bg-green-600 hover:bg-green-700"
+                    >
+                        {isEnriching ? (
+                            <>
+                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                {enrichProgress ? `${enrichProgress.current}/${enrichProgress.total}` : '準備中...'}
+                            </>
+                        ) : (
+                            <>
+                                <Phone className="h-4 w-4 mr-1" />
+                                電話番号取得
+                            </>
+                        )}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => fetchCompanies()}>
+                        更新
+                    </Button>
+                </div>
             </div>
 
             {/* Filters */}

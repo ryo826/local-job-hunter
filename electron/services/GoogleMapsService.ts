@@ -140,9 +140,9 @@ let instance: GoogleMapsService | null = null;
 
 export function getGoogleMapsService(): GoogleMapsService | null {
     if (!instance) {
-        const apiKey = process.env.MAPS_API_KEY;
+        const apiKey = process.env.GOOGLE_MAPS_API_KEY;
         if (!apiKey) {
-            console.warn('[GoogleMaps] MAPS_API_KEY not set in environment');
+            console.warn('[GoogleMaps] GOOGLE_MAPS_API_KEY not set in environment');
             return null;
         }
         instance = new GoogleMapsService(apiKey);
