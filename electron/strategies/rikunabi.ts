@@ -10,8 +10,8 @@ export class RikunabiStrategy implements ScrapingStrategy {
     readonly source = 'rikunabi';
 
     // レート制限設定
-    private readonly REQUEST_INTERVAL = 5000;  // 5秒
-    private readonly PAGE_INTERVAL = 8000;     // 8秒
+    private readonly REQUEST_INTERVAL = 3000;  // 3秒
+    private readonly PAGE_INTERVAL = 5000;     // 5秒
 
     async *scrape(page: Page, params: ScrapingParams, onLog?: (message: string) => void): AsyncGenerator<CompanyData> {
         const { keywords, location } = params;
@@ -21,10 +21,8 @@ export class RikunabiStrategy implements ScrapingStrategy {
             else console.log(`[Rikunabi] ${msg}`);
         };
 
-        // 検索結果ページ
+        // 検索結果ページURL構築
         let searchUrl = 'https://next.rikunabi.com/lst/';
-
-        // キーワード検索
         if (keywords) {
             searchUrl += `?kw=${encodeURIComponent(keywords)}`;
         }
@@ -40,7 +38,6 @@ export class RikunabiStrategy implements ScrapingStrategy {
                 // ステルス設定: webdriverフラグを削除
                 await page.addInitScript(() => {
                     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                    // Chrome DevTools Protocol検出回避
                     (window as any).chrome = { runtime: {} };
                 });
 
@@ -70,111 +67,22 @@ export class RikunabiStrategy implements ScrapingStrategy {
                 }
 
                 // 追加待機 - JSの実行完了を待つ
-                log('Waiting for JavaScript to execute...');
-                await page.waitForTimeout(5000);
-
-                // Cookie同意ボタンがあればクリック
-                const cookieSelectors = [
-                    'button:has-text("同意")',
-                    'button:has-text("OK")',
-                    'button:has-text("Accept")',
-                    '[class*="cookie"] button',
-                    '[id*="cookie"] button'
-                ];
-                for (const selector of cookieSelectors) {
-                    const cookieButton = page.locator(selector).first();
-                    if (await cookieButton.count() > 0 && await cookieButton.isVisible()) {
-                        log(`Found cookie consent button: ${selector}`);
-                        await cookieButton.click().catch(() => {});
-                        await page.waitForTimeout(1000);
-                        break;
-                    }
-                }
-
-                // モーダルを閉じる
-                const modalSelectors = [
-                    'button[aria-label="close"]',
-                    'button[aria-label="閉じる"]',
-                    '[class*="modal"] button[class*="close"]',
-                    '[class*="overlay"] button'
-                ];
-                for (const selector of modalSelectors) {
-                    const closeButton = page.locator(selector).first();
-                    if (await closeButton.count() > 0 && await closeButton.isVisible()) {
-                        log(`Found modal close button: ${selector}`);
-                        await closeButton.click().catch(() => {});
-                        await page.waitForTimeout(1000);
-                        break;
-                    }
-                }
-
-                // ページのURL確認
-                const currentUrl = page.url();
-                log(`Current URL: ${currentUrl}`);
-
-                // デバッグ: ページタイトルとHTML構造を確認
-                const pageTitle = await page.title();
-                log(`Page title: ${pageTitle}`);
-
-                // ページの状態を確認
-                const bodyContent = await page.evaluate(() => {
-                    const body = document.body;
-                    return {
-                        childCount: body.children.length,
-                        textLength: body.innerText.length,
-                        hasNextDiv: !!document.getElementById('__next'),
-                        nextDivChildren: document.getElementById('__next')?.children.length || 0
-                    };
-                });
-                log(`Page state: children=${bodyContent.childCount}, textLength=${bodyContent.textLength}, hasNext=${bodyContent.hasNextDiv}, nextChildren=${bodyContent.nextDivChildren}`);
-
-                // 段階的スクロールでlazy loadをトリガー
-                log('Triggering lazy load with scroll...');
-                await page.evaluate(async () => {
-                    for (let i = 0; i < 10; i++) {
-                        window.scrollTo(0, i * 300);
-                        await new Promise(r => setTimeout(r, 300));
-                    }
-                    window.scrollTo(0, 0);
-                });
                 await page.waitForTimeout(3000);
 
-                // 様々なセレクターで求人カードを探す
-                const cardSelectors = [
-                    '[class*="cardHead"]',
-                    '[class*="detailArea"]',
-                    '[class*="employerName"]',
-                    '[class*="jobCard"]',
-                    '[class*="JobCard"]',
-                    'article',
-                    '[data-testid*="job"]',
-                    'a[href*="/job/"]'
-                ];
-
-                let foundCards = false;
-                for (const selector of cardSelectors) {
-                    const count = await page.locator(selector).count();
-                    if (count > 0) {
-                        log(`Found ${count} elements with selector: ${selector}`);
-                        foundCards = true;
+                // 求人カードが表示されるまで待機
+                log('Waiting for job cards to load...');
+                try {
+                    await page.waitForSelector('a[class*="styles_bigCard"]', { timeout: 15000 });
+                    log('Job cards found!');
+                } catch {
+                    log('Warning: Job card selector not found, trying alternative...');
+                    // 代替セレクターを試す
+                    try {
+                        await page.waitForSelector('[class*="styles_detailArea"]', { timeout: 10000 });
+                        log('Found detailArea elements');
+                    } catch {
+                        log('Warning: No job cards found after extended wait');
                     }
-                }
-
-                if (!foundCards) {
-                    // 追加のデバッグ情報
-                    const allClasses = await page.evaluate(() => {
-                        const elements = document.querySelectorAll('*[class]');
-                        const classes = new Set<string>();
-                        elements.forEach(el => {
-                            el.className.split(' ').forEach(c => {
-                                if (c.includes('card') || c.includes('Card') || c.includes('job') || c.includes('Job') || c.includes('list') || c.includes('List')) {
-                                    classes.add(c);
-                                }
-                            });
-                        });
-                        return Array.from(classes).slice(0, 20);
-                    });
-                    log(`Relevant CSS classes found: ${allClasses.join(', ')}`);
                 }
 
                 pageLoaded = true;
@@ -201,207 +109,92 @@ export class RikunabiStrategy implements ScrapingStrategy {
             pageNum++;
             log(`Scraping page ${pageNum}...`);
 
-            // スクロールしてコンテンツ読み込み
-            await this.scrollToBottom(page, log);
+            // 求人カードを取得 (正しいセレクター: a[class*="styles_bigCard"])
+            const jobCards = await page.locator('a[class*="styles_bigCard"]').all();
+            log(`Found ${jobCards.length} job cards`);
 
-            // 求人カードを取得 - 複数の戦略を試行
-            let jobCards: any[] = [];
-            let cardType = '';
-
-            // 戦略1: 求人リンクを直接探す（最も確実）
-            const jobLinks = await page.locator('a[href*="/job/"]').all();
-            log(`Found ${jobLinks.length} job links`);
-
-            if (jobLinks.length > 0) {
-                // リンクをユニークなURLでフィルタリング
-                const seenUrls = new Set<string>();
-                for (const link of jobLinks) {
-                    const href = await link.getAttribute('href');
-                    if (href && !seenUrls.has(href)) {
-                        seenUrls.add(href);
-                        jobCards.push(link);
-                    }
-                }
-                cardType = 'job links';
-                log(`Unique job links: ${jobCards.length}`);
-            }
-
-            // 戦略2: カードコンテナを探す
             if (jobCards.length === 0) {
-                const cardSelectors = [
-                    '[class*="cardHead"]',
-                    '[class*="detailArea"]',
-                    '[class*="jobCard"]',
-                    '[class*="JobCard"]',
-                    'article[class*="card"]',
-                    '[class*="listItem"]',
-                    '[class*="ListItem"]'
-                ];
-
-                for (const selector of cardSelectors) {
-                    const cards = await page.locator(selector).all();
-                    if (cards.length > 0) {
-                        jobCards = cards;
-                        cardType = selector;
-                        log(`Found ${cards.length} cards with selector: ${selector}`);
-                        break;
-                    }
-                }
-            }
-
-            // 戦略3: 会社名要素から親をたどる
-            if (jobCards.length === 0) {
-                const employerNames = await page.locator('[class*="employerName"], [class*="companyName"]').all();
-                log(`Found ${employerNames.length} employer name elements`);
-                if (employerNames.length > 0) {
-                    jobCards = employerNames;
-                    cardType = 'employer names';
-                }
-            }
-
-            log(`Total job cards found: ${jobCards.length} (type: ${cardType})`);
-
-            // デバッグ: カードが見つからない場合、ページの状態を詳しく出力
-            if (jobCards.length === 0) {
-                const debugInfo = await page.evaluate(() => {
-                    const allLinks = Array.from(document.querySelectorAll('a')).map(a => a.href).filter(h => h.includes('rikunabi'));
+                // デバッグ: ページ状態を確認
+                const pageState = await page.evaluate(() => {
                     return {
-                        linkCount: allLinks.length,
-                        sampleLinks: allLinks.slice(0, 5),
-                        bodyText: document.body.innerText.substring(0, 500)
+                        title: document.title,
+                        bodyTextLength: document.body.innerText.length,
+                        allLinks: document.querySelectorAll('a').length,
+                        hasNextDiv: !!document.getElementById('__next')
                     };
                 });
-                log(`Debug - links: ${debugInfo.linkCount}, samples: ${debugInfo.sampleLinks.join(', ')}`);
-                log(`Debug - body text preview: ${debugInfo.bodyText.substring(0, 200)}...`);
-            }
+                log(`Page state: title="${pageState.title}", textLength=${pageState.bodyTextLength}, links=${pageState.allLinks}, hasNext=${pageState.hasNextDiv}`);
 
-            if (jobCards.length === 0) {
                 log('No job cards found, stopping');
                 break;
             }
 
+            // 各カードからURLを収集
+            const jobUrls: string[] = [];
             for (const card of jobCards) {
+                const href = await card.getAttribute('href');
+                if (href && href.includes('/viewjob/')) {
+                    jobUrls.push(href);
+                }
+            }
+            log(`Collected ${jobUrls.length} job URLs`);
+
+            // 各求人詳細ページを訪問
+            for (const jobUrl of jobUrls) {
                 try {
-                    // リンクベースの場合、直接URLを取得
-                    let detailUrl = '';
-                    if (cardType === 'job links') {
-                        detailUrl = await card.getAttribute('href') || '';
-                    }
-
-                    // カードコンテナを特定
-                    let cardContainer = card;
-                    if (cardType === 'job links' || cardType === 'employer names') {
-                        // 親要素をたどってカードコンテナを探す
-                        cardContainer = card.locator('xpath=ancestor::*[contains(@class, "card") or contains(@class, "Card") or contains(@class, "item") or contains(@class, "Item")][1]');
-                        if (await cardContainer.count() === 0) {
-                            cardContainer = card.locator('..').locator('..');
-                        }
-                    }
-
-                    // リンクURLを取得（まだ取得していない場合）
-                    if (!detailUrl) {
-                        const linkEl = cardContainer.locator('a[href*="/job/"]').first();
-                        if (await linkEl.count() > 0) {
-                            detailUrl = await linkEl.getAttribute('href') || '';
-                        }
-                    }
-
-                    if (!detailUrl) {
-                        log('No detail URL found, skipping');
-                        continue;
-                    }
-
-                    // 完全なURLに変換
-                    const fullUrl = detailUrl.startsWith('http') ? detailUrl : `https://next.rikunabi.com${detailUrl}`;
-                    log(`Visiting detail page: ${fullUrl}`);
+                    const fullUrl = jobUrl.startsWith('http') ? jobUrl : `https://next.rikunabi.com${jobUrl}`;
+                    log(`Visiting: ${fullUrl}`);
 
                     // レート制限
                     await page.waitForTimeout(this.REQUEST_INTERVAL);
 
                     // 詳細ページへ移動
+                    await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
                     try {
-                        await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                        await page.waitForTimeout(randomDelay(3000, 5000));
-                    } catch (navError: any) {
-                        log(`Navigation error: ${navError.message}, skipping`);
-                        continue;
+                        await page.waitForLoadState('networkidle', { timeout: 15000 });
+                    } catch {
+                        // タイムアウトは無視
+                    }
+                    await page.waitForTimeout(2000);
+
+                    // 求人タイトルを取得
+                    let jobTitle = '';
+                    const titleEl = page.locator('h1[class*="styles_heading"], h2[class*="styles_title"]').first();
+                    if (await titleEl.count() > 0) {
+                        jobTitle = (await titleEl.textContent())?.trim() || '';
                     }
 
-                    // 詳細ページから会社名を取得
+                    // 会社名を取得 (会社名リンク: a[class*="styles_linkTextCompany"])
                     let companyName = '';
-                    const companySelectors = [
-                        'a[class*="linkTextCompany"]',
-                        'a[href*="/company/"]',
-                        '[class*="employerName"]',
-                        '[class*="companyName"]'
-                    ];
-                    for (const selector of companySelectors) {
-                        const el = page.locator(selector).first();
-                        if (await el.count() > 0) {
-                            companyName = (await el.textContent())?.trim() || '';
-                            if (companyName) break;
+                    const companyLinkEl = page.locator('a[class*="styles_linkTextCompany"]').first();
+                    if (await companyLinkEl.count() > 0) {
+                        companyName = (await companyLinkEl.textContent())?.trim() || '';
+                    }
+
+                    // 会社名がない場合、別のセレクターを試す
+                    if (!companyName) {
+                        const employerNameEl = page.locator('[class*="styles_employerName"]').first();
+                        if (await employerNameEl.count() > 0) {
+                            companyName = (await employerNameEl.textContent())?.trim() || '';
                         }
                     }
 
                     if (!companyName) {
-                        log('No company name found on detail page, skipping');
+                        log('No company name found, skipping');
                         continue;
-                    }
-
-                    // 職種を取得
-                    let jobTitle = '';
-                    const titleSelectors = ['h1', 'h2[class*="title"]', '[class*="heading"] h2'];
-                    for (const selector of titleSelectors) {
-                        const el = page.locator(selector).first();
-                        if (await el.count() > 0) {
-                            jobTitle = (await el.textContent())?.trim() || '';
-                            if (jobTitle) break;
-                        }
                     }
 
                     log(`Found: ${companyName}`);
 
-                    // 詳細ページから情報を抽出
-
-                    // 会社名（詳細ページから正式名称を取得）
-                    const companyNameLinkEl = page.locator('a[class*="linkTextCompany"], a[href*="/company/"]').first();
-                    if (await companyNameLinkEl.count() > 0) {
-                        const detailCompanyName = (await companyNameLinkEl.textContent())?.trim();
-                        if (detailCompanyName) {
-                            companyName = detailCompanyName;
-                        }
-                    }
-
-                    // 「企業情報」タブをクリック
-                    const companyTabButton = page.locator('span:has-text("企業情報"), button:has-text("企業情報"), a:has-text("企業情報")').first();
-                    if (await companyTabButton.count() > 0) {
-                        try {
-                            await companyTabButton.click();
-                            await page.waitForTimeout(randomDelay(2000, 3000));
-                        } catch (error) {
-                            log(`Could not click company tab: ${error}`);
-                        }
-                    }
+                    // 募集要項テーブルから情報を抽出
+                    const jobDetails = await this.extractJobDetails(page, log);
 
                     // 企業情報を抽出
-                    const address = await this.extractTextByLabel(page, '本社所在地') ||
-                        await this.extractTextByLabel(page, '所在地') ||
-                        await this.extractTextByLabel(page, '勤務地');
-                    const industry = await this.extractTextByLabel(page, '事業内容') ||
-                        await this.extractTextByLabel(page, '業種');
-                    const employees = await this.extractTextByLabel(page, '従業員数');
-                    const establishment = await this.extractTextByLabel(page, '設立');
-                    const representative = await this.extractTextByLabel(page, '代表者');
-                    const revenue = await this.extractTextByLabel(page, '売上高');
-                    const phone = await this.extractTextByLabel(page, '企業代表番号') ||
-                        await this.extractTextByLabel(page, '電話番号');
-                    const detailSalary = await this.extractTextByLabel(page, '給与') ||
-                        await this.extractTextByLabel(page, '月給');
+                    const companyInfo = await this.extractCompanyInfo(page, log);
 
-                    // 企業HPを取得
-                    const companyUrl = await this.extractCompanyUrl(page);
-
-                    // 住所の正規化
+                    // データを統合
+                    const address = companyInfo['本社所在地'] || jobDetails['勤務地'] || '';
                     const normalizedAddress = this.normalizeAddress(address);
                     const cleanName = this.cleanCompanyName(companyName);
 
@@ -410,56 +203,51 @@ export class RikunabiStrategy implements ScrapingStrategy {
                         url: page.url(),
                         company_name: cleanName,
                         job_title: jobTitle,
-                        salary_text: detailSalary,
-                        representative,
-                        establishment,
-                        employees,
-                        revenue,
-                        phone: phone,
+                        salary_text: jobDetails['給与'] || '',
+                        representative: companyInfo['代表者'] || '',
+                        establishment: companyInfo['設立'] || '',
+                        employees: companyInfo['従業員数'] || '',
+                        revenue: companyInfo['売上高'] || '',
+                        phone: companyInfo['企業代表番号'] || '',
                         address: normalizedAddress,
                         area: this.extractAreaFromAddress(normalizedAddress),
-                        homepage_url: companyUrl,
-                        industry,
+                        homepage_url: companyInfo['企業HP'] || '',
+                        industry: companyInfo['事業内容'] || '',
                         scrape_status: 'step1_completed',
                     };
 
-                    // リストページに戻る
-                    await page.goBack({ waitUntil: 'domcontentloaded' });
-                    await page.waitForTimeout(randomDelay(2000, 4000));
-
-                    // URLが検索結果ページでない場合、再度戻る
-                    if (!page.url().includes('/lst/')) {
-                        await page.goBack({ waitUntil: 'domcontentloaded' });
-                        await page.waitForTimeout(randomDelay(1000, 2000));
-                    }
-
-                } catch (err) {
-                    log(`Error scraping job: ${err}`);
-                    try {
-                        await page.goBack({ waitUntil: 'domcontentloaded' });
-                        await page.waitForTimeout(2000);
-                    } catch {
-                        log('Failed to go back, reloading search page');
-                        await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
-                        await page.waitForTimeout(3000);
-                        break;
-                    }
+                } catch (err: any) {
+                    log(`Error scraping job: ${err.message}`);
                     continue;
                 }
             }
 
-            // 次のページへ
+            // 検索結果ページに戻る
+            log('Returning to search results...');
+            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            try {
+                await page.waitForLoadState('networkidle', { timeout: 15000 });
+            } catch {
+                // タイムアウトは無視
+            }
             await page.waitForTimeout(this.PAGE_INTERVAL);
 
-            // ページネーション
-            const nextButton = page.locator('a:has-text("次へ"), a:has-text("次のページ"), a[rel="next"], [class*="next"] a').first();
-            if (await nextButton.count() > 0 && await nextButton.isVisible()) {
-                try {
-                    await nextButton.click();
-                    await page.waitForTimeout(randomDelay(4000, 6000));
-                } catch (error) {
-                    log(`Error navigating to next page: ${error}`);
+            // 次のページへ (aria-label="次へ" を使用)
+            const nextButton = page.locator('a[aria-label="次へ"]').first();
+            if (await nextButton.count() > 0) {
+                const isDisabled = await nextButton.getAttribute('aria-disabled');
+                if (isDisabled === 'true') {
+                    log('Next button is disabled, no more pages');
                     hasNext = false;
+                } else {
+                    log('Clicking next page...');
+                    await nextButton.click();
+                    try {
+                        await page.waitForLoadState('networkidle', { timeout: 15000 });
+                    } catch {
+                        // タイムアウトは無視
+                    }
+                    await page.waitForTimeout(3000);
                 }
             } else {
                 log('No next page button found');
@@ -470,114 +258,126 @@ export class RikunabiStrategy implements ScrapingStrategy {
         log(`Completed scraping ${pageNum} pages`);
     }
 
-    // スクロールしてコンテンツを読み込み
-    private async scrollToBottom(page: Page, log: (msg: string) => void): Promise<void> {
-        try {
-            let previousHeight = 0;
-            let currentHeight = await page.evaluate(() => document.body.scrollHeight);
-            let attempts = 0;
-            const maxAttempts = 3;
+    // 募集要項テーブルから情報を抽出
+    private async extractJobDetails(page: Page, log: (msg: string) => void): Promise<Record<string, string>> {
+        const details: Record<string, string> = {};
 
-            while (previousHeight < currentHeight && attempts < maxAttempts) {
-                previousHeight = currentHeight;
-                await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-                await page.waitForTimeout(randomDelay(1000, 2000));
-                currentHeight = await page.evaluate(() => document.body.scrollHeight);
-                attempts++;
+        try {
+            // 募集要項テーブル: table[class*="styles_tableAboutApplication"]
+            const table = page.locator('table[class*="styles_tableAboutApplication"]').first();
+            if (await table.count() === 0) {
+                log('Job details table not found');
+                return details;
             }
 
-            await page.evaluate(() => window.scrollTo(0, 0));
-            await page.waitForTimeout(500);
-        } catch (error) {
-            log(`Error during scroll: ${error}`);
+            // テーブル行: tr[class*="styles_row"]
+            const rows = await table.locator('tr[class*="styles_row"]').all();
+
+            for (const row of rows) {
+                try {
+                    // ラベル: th[class*="styles_title"]
+                    const labelEl = row.locator('th[class*="styles_title"]');
+                    if (await labelEl.count() === 0) continue;
+
+                    const label = (await labelEl.textContent())?.trim() || '';
+                    if (!label) continue;
+
+                    // 内容: td[class*="styles_content"]
+                    const contentEl = row.locator('td[class*="styles_content"]');
+                    if (await contentEl.count() === 0) continue;
+
+                    const content = (await contentEl.textContent())?.trim() || '';
+                    details[label] = content;
+                } catch {
+                    // 個別行のエラーは無視
+                }
+            }
+        } catch (error: any) {
+            log(`Error extracting job details: ${error.message}`);
         }
+
+        return details;
     }
 
-    // ラベルからテキストを抽出
-    private async extractTextByLabel(page: Page, label: string): Promise<string | undefined> {
+    // 企業情報を抽出
+    private async extractCompanyInfo(page: Page, log: (msg: string) => void): Promise<Record<string, string>> {
+        const info: Record<string, string> = {};
+
         try {
-            // 方法1: ラベルの次の要素を探す
-            const labelEl = page.locator(`text="${label}"`).first();
-            if (await labelEl.count() > 0) {
-                // 同じ親の中の次の要素を探す
-                const parent = labelEl.locator('..');
-                const nextP = parent.locator('p[class*="bodyText"]').first();
-                if (await nextP.count() > 0) {
-                    const text = await nextP.textContent();
-                    if (text && !text.includes(label)) {
-                        return this.cleanText(text);
+            // 企業情報tbody: tbody[class*="styles_companyInfo"]
+            const companyTable = page.locator('tbody[class*="styles_companyInfo"]');
+            if (await companyTable.count() === 0) {
+                // 代替: 「企業情報」セクションを探す
+                const companySection = page.locator('section:has(h2:has-text("企業情報"))');
+                if (await companySection.count() > 0) {
+                    const rows = await companySection.locator('tr[class*="styles_row"]').all();
+                    for (const row of rows) {
+                        try {
+                            const labelEl = row.locator('th h3, th[class*="styles_title"]');
+                            const label = (await labelEl.textContent())?.trim() || '';
+                            if (!label) continue;
+
+                            const contentEl = row.locator('td');
+
+                            // リンクがある場合はhrefを取得
+                            const linkEl = contentEl.locator('a');
+                            if (await linkEl.count() > 0) {
+                                const href = await linkEl.getAttribute('href');
+                                // 外部リンクの場合はURLを保存
+                                if (href && !href.includes('rikunabi.com')) {
+                                    info[label] = href;
+                                } else {
+                                    info[label] = (await contentEl.textContent())?.trim() || '';
+                                }
+                            } else {
+                                info[label] = (await contentEl.textContent())?.trim() || '';
+                            }
+                        } catch {
+                            // 個別行のエラーは無視
+                        }
                     }
                 }
+                return info;
             }
 
-            // 方法2: dt/dd パターン
-            const dtEl = page.locator(`dt:has-text("${label}")`).first();
-            if (await dtEl.count() > 0) {
-                const ddEl = dtEl.locator('~ dd').first();
-                if (await ddEl.count() > 0) {
-                    return this.cleanText(await ddEl.textContent());
-                }
-            }
+            // 企業情報行: tr[class*="styles_companyInfo"]
+            const rows = await companyTable.locator('tr[class*="styles_companyInfo"], tr[class*="styles_row"]').all();
 
-            // 方法3: th/td パターン
-            const thEl = page.locator(`th:has-text("${label}")`).first();
-            if (await thEl.count() > 0) {
-                const tdEl = thEl.locator('~ td').first();
-                if (await tdEl.count() > 0) {
-                    return this.cleanText(await tdEl.textContent());
-                }
-            }
+            for (const row of rows) {
+                try {
+                    // ラベル: th h3
+                    const labelEl = row.locator('th h3, th[class*="styles_title"]');
+                    if (await labelEl.count() === 0) continue;
 
-            // 方法4: テキスト内のラベル: 値 パターン
-            const allText = await page.locator(`text=/${label}[：:]/`).first();
-            if (await allText.count() > 0) {
-                const text = await allText.textContent();
-                if (text) {
-                    const match = text.match(new RegExp(`${label}[：:]\\s*(.+)`));
-                    if (match) {
-                        return this.cleanText(match[1]);
+                    const label = (await labelEl.textContent())?.trim() || '';
+                    if (!label) continue;
+
+                    // 内容: td
+                    const contentEl = row.locator('td');
+                    if (await contentEl.count() === 0) continue;
+
+                    // リンクがある場合はhrefを取得 (企業HPなど)
+                    const linkEl = contentEl.locator('a');
+                    if (await linkEl.count() > 0) {
+                        const href = await linkEl.getAttribute('href');
+                        // 外部リンクの場合はURLを保存
+                        if (href && !href.includes('rikunabi.com')) {
+                            info[label] = href;
+                        } else {
+                            info[label] = (await contentEl.textContent())?.trim() || '';
+                        }
+                    } else {
+                        info[label] = (await contentEl.textContent())?.trim() || '';
                     }
+                } catch {
+                    // 個別行のエラーは無視
                 }
             }
-
-        } catch (error) {
-            // ignore
+        } catch (error: any) {
+            log(`Error extracting company info: ${error.message}`);
         }
-        return undefined;
-    }
 
-    // テキストをクリーンアップ
-    private cleanText(text: string | null): string | undefined {
-        if (!text) return undefined;
-        return text
-            .replace(/\s+/g, ' ')
-            .replace(/^\s+|\s+$/g, '')
-            .trim() || undefined;
-    }
-
-    // 企業URLを抽出
-    private async extractCompanyUrl(page: Page): Promise<string | undefined> {
-        try {
-            const homepageLink = page.locator('a:has-text("企業ホームページ"), a:has-text("HP"), a:has-text("公式サイト")').first();
-            if (await homepageLink.count() > 0) {
-                const href = await homepageLink.getAttribute('href');
-                if (href && !href.includes('rikunabi.com')) {
-                    return href;
-                }
-            }
-
-            // 外部リンクを探す
-            const externalLinks = await page.locator('a[href^="http"]:not([href*="rikunabi.com"])').all();
-            for (const link of externalLinks) {
-                const href = await link.getAttribute('href');
-                if (href && !href.includes('javascript:') && !href.includes('mailto:')) {
-                    return href;
-                }
-            }
-        } catch (error) {
-            // ignore
-        }
-        return undefined;
+        return info;
     }
 
     // 住所の正規化
