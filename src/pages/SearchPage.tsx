@@ -7,7 +7,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Clock } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 
 export function SearchPage() {
@@ -140,11 +139,6 @@ export function SearchPage() {
                     {/* Execution Control */}
                     <Card className="p-6">
                         <div className="space-y-4">
-                            <div className="flex items-center gap-2">
-                                <Clock className="h-4 w-4 text-muted-foreground" />
-                                <Badge variant="secondary">⏱ 最大実行時間: 60分</Badge>
-                            </div>
-
                             {!isScrapingRunning ? (
                                 <Button
                                     onClick={handleStartScraping}

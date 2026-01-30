@@ -13,7 +13,6 @@ const DataConverter_1 = require("./services/DataConverter");
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const path_1 = __importDefault(require("path"));
 const electron_1 = require("electron");
-const TIMEOUT_MS = 60 * 60 * 1000; // 60 min
 class ScrapingEngine {
     browser = null;
     isRunning = false;

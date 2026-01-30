@@ -18,8 +18,6 @@ export interface ScrapingProgress {
     duplicateCount: number;
 }
 
-const TIMEOUT_MS = 60 * 60 * 1000; // 60 min
-
 export class ScrapingEngine {
     private browser: Browser | null = null;
     private isRunning = false;
