@@ -329,7 +329,21 @@ export class MynaviStrategy implements ScrapingStrategy {
                 try {
                     const nextUrl = await nextButton.getAttribute('href');
                     if (nextUrl) {
-                        currentSearchUrl = nextUrl.startsWith('http') ? nextUrl : `https://tenshoku.mynavi.jp${nextUrl}`;
+                        // URL正規化: 二重ドメインや不正なパスを修正
+                        let fullNextUrl: string;
+                        if (nextUrl.startsWith('http')) {
+                            fullNextUrl = nextUrl;
+                        } else if (nextUrl.startsWith('//')) {
+                            // プロトコル相対URL (//tenshoku.mynavi.jp/...)
+                            fullNextUrl = `https:${nextUrl}`;
+                        } else if (nextUrl.startsWith('/')) {
+                            // 絶対パス
+                            fullNextUrl = `https://tenshoku.mynavi.jp${nextUrl}`;
+                        } else {
+                            // 相対パス
+                            fullNextUrl = `https://tenshoku.mynavi.jp/${nextUrl}`;
+                        }
+                        currentSearchUrl = fullNextUrl;
                         log(`Navigating to next page: ${currentSearchUrl}`);
                         await page.goto(currentSearchUrl, { waitUntil: 'networkidle', timeout: 30000 });
                         await page.waitForTimeout(randomDelay(3000, 5000));
