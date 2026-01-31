@@ -145,7 +145,16 @@ export class GoogleMapsService {
                 timeout: 10000,
             });
 
-            if (searchResponse.data.status !== 'OK' || !searchResponse.data.results?.length) {
+            // API status check with detailed logging
+            if (searchResponse.data.status !== 'OK') {
+                console.log(`[GoogleMaps] API status: ${searchResponse.data.status}`);
+                if (searchResponse.data.error_message) {
+                    console.log(`[GoogleMaps] API error: ${searchResponse.data.error_message}`);
+                }
+                return null;
+            }
+
+            if (!searchResponse.data.results?.length) {
                 console.log(`[GoogleMaps] No results found for: ${query}`);
                 return null;
             }
@@ -231,6 +240,12 @@ export function getGoogleMapsService(): GoogleMapsService | null {
             console.warn('[GoogleMaps] GOOGLE_MAPS_API_KEY not set in environment');
             return null;
         }
+        // Check for placeholder value
+        if (apiKey === 'your_google_maps_api_key_here' || apiKey.startsWith('your_')) {
+            console.warn('[GoogleMaps] GOOGLE_MAPS_API_KEY appears to be a placeholder. Please set a valid API key in .env file.');
+            return null;
+        }
+        console.log('[GoogleMaps] Service initialized with API key');
         instance = new GoogleMapsService(apiKey);
     }
     return instance;

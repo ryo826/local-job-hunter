@@ -6,7 +6,14 @@ import { ScrapingEngine } from './scraping-engine';
 import { getExportService } from './services/ExportService';
 
 // Load environment variables from .env file
-dotenv.config();
+// In development: .env is in project root
+// In production: .env should be in project root (2 levels up from dist-electron/electron/)
+const envPath = app.isPackaged
+    ? path.join(process.resourcesPath, '.env')
+    : path.join(__dirname, '../../.env');
+dotenv.config({ path: envPath });
+console.log('[Main] Loading .env from:', envPath);
+console.log('[Main] GOOGLE_MAPS_API_KEY set:', !!process.env.GOOGLE_MAPS_API_KEY);
 
 let mainWindow: BrowserWindow | null = null;
 let scrapingEngine: ScrapingEngine | null = null;
@@ -115,7 +122,13 @@ ipcMain.handle('enrich:startPhoneLookup', async () => {
         const service = getGoogleMapsService();
 
         if (!service) {
-            return { success: false, error: 'GOOGLE_MAPS_API_KEY not configured. Please set it in .env file.' };
+            const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+            let errorMsg = 'GOOGLE_MAPS_API_KEY not configured. Please set it in .env file.';
+            if (apiKey === 'your_google_maps_api_key_here' || apiKey?.startsWith('your_')) {
+                errorMsg = 'GOOGLE_MAPS_API_KEY is a placeholder. Please set a valid Google Maps API key in .env file.';
+            }
+            console.error('[PhoneLookup]', errorMsg);
+            return { success: false, error: errorMsg };
         }
 
         // 電話番号がない会社を取得
