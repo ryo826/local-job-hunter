@@ -343,19 +343,17 @@ export function SearchPage() {
                     <Card className="sticky top-8 h-fit p-6">
                         <h2 className="mb-4 text-lg font-semibold">実行中...</h2>
                         <div className="space-y-4">
-                            {/* 総件数と推定時間 */}
+                            {/* 総件数と時間情報 */}
                             {scrapingProgress.totalJobs !== undefined && (
                                 <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
                                     <p className="text-sm font-medium text-blue-800">
-                                        条件に合う求人: <span className="text-lg">{scrapingProgress.totalJobs.toLocaleString()}</span>件
+                                        検索結果: <span className="text-lg">{scrapingProgress.totalJobs.toLocaleString()}</span>件
                                     </p>
-                                    {scrapingProgress.estimatedMinutes !== undefined && scrapingProgress.estimatedMinutes > 0 && (
-                                        <p className="text-xs text-blue-600 mt-1">
-                                            残り約 {scrapingProgress.estimatedMinutes} 分
-                                        </p>
-                                    )}
                                 </div>
                             )}
+
+                            {/* 経過時間・残り時間 */}
+                            <ElapsedTime startTime={scrapingProgress.startTime} estimatedMinutes={scrapingProgress.estimatedMinutes} />
 
                             <div>
                                 <div className="mb-2 flex items-center justify-between text-sm">
@@ -582,6 +580,41 @@ function SiteCheckbox({
             <Badge className={`${badgeColor} border-0`}>{badgeText}</Badge>
             {requiresLogin && (
                 <span className="text-xs text-yellow-600">🔒</span>
+            )}
+        </div>
+    );
+}
+
+// 経過時間表示コンポーネント
+function ElapsedTime({ startTime, estimatedMinutes }: { startTime?: number; estimatedMinutes?: number }) {
+    const [elapsed, setElapsed] = useState(0);
+
+    useEffect(() => {
+        if (!startTime) return;
+
+        const updateElapsed = () => {
+            setElapsed(Math.floor((Date.now() - startTime) / 1000));
+        };
+
+        updateElapsed();
+        const interval = setInterval(updateElapsed, 1000);
+
+        return () => clearInterval(interval);
+    }, [startTime]);
+
+    if (!startTime) return null;
+
+    const formatTime = (seconds: number) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    return (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+            <span>経過時間: {formatTime(elapsed)}</span>
+            {estimatedMinutes !== undefined && estimatedMinutes > 0 && (
+                <span>残り約 {estimatedMinutes} 分</span>
             )}
         </div>
     );
