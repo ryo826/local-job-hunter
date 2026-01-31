@@ -110,12 +110,6 @@ export class DodaStrategy implements ScrapingStrategy {
         const searchUrl = this.buildSearchUrl(params);
         let currentSearchUrl = searchUrl;
 
-        // ダミーコード（既存の条件ロジックを維持するため）
-        if (false) {
-                searchUrl += `${separator}oc=${codes.join(',')}`;
-            }
-        }
-
         log(`Navigating to: ${searchUrl}`);
 
         // HTTP/2エラー対策: 複数回リトライ
