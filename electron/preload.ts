@@ -67,6 +67,8 @@ const electronAPI = {
             ipcRenderer.invoke('db:getCompany', id),
         updateCompany: (id: number, updates: Partial<Company>): Promise<{ success: boolean }> =>
             ipcRenderer.invoke('db:updateCompany', id, updates),
+        deleteAllCompanies: (): Promise<{ success: boolean; deleted?: number; error?: string }> =>
+            ipcRenderer.invoke('db:deleteAllCompanies'),
     },
     scraper: {
         start: (options: ScrapingOptions): Promise<{ success: boolean; error?: string }> =>
