@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 import { initDB, companyRepository } from './database';
@@ -56,6 +57,14 @@ ipcMain.handle('db:getCompany', async (_event, id) => {
     return companyRepository.getById(id);
 });
 
+ipcMain.handle('db:getDistinctAreas', async () => {
+    return companyRepository.getDistinctAreas();
+});
+
+ipcMain.handle('db:getDistinctJobTitles', async () => {
+    return companyRepository.getDistinctJobTitles();
+});
+
 ipcMain.handle('db:updateCompany', async (_event, id, updates) => {
     try {
         companyRepository.update(id, updates);
@@ -96,6 +105,74 @@ ipcMain.handle('scraper:stop', async () => {
         scrapingEngine = null;
     }
     return { success: true };
+});
+
+ipcMain.handle('export:csv', async (_event, ids?: number[], filters?: any) => {
+    try {
+        let companies;
+        if (ids && ids.length > 0) {
+            // Select specific IDs
+            // Since getAll doesn't support ID list, we fetch by ID loop or fetch all and filter.
+            // For efficiency with small DB, fetching all and filtering is fine, or improve repo.
+            // Let's use filter on getAll results for safety.
+            const all = companyRepository.getAll({});
+            companies = all.filter(c => ids.includes(c.id));
+        } else {
+            // Use filters
+            companies = companyRepository.getAll(filters || {});
+        }
+
+        if (companies.length === 0) {
+            return { success: false, error: '出力対象のデータがありません' };
+        }
+
+        // Generate CSV
+        const headers = [
+            '会社名', 'ソース', 'ステータス', '電話番号', 'HP',
+            '業種', 'エリア', '職種', '給与',
+            '住所', '設立', '従業員数', 'URL'
+        ];
+
+        const escape = (field: any) => {
+            if (field === null || field === undefined) return '';
+            const str = String(field).replace(/"/g, '""');
+            return `"${str}"`;
+        };
+
+        const rows = companies.map(c => [
+            escape(c.company_name),
+            escape(c.source),
+            escape(c.status),
+            escape(c.phone),
+            escape(c.homepage_url),
+            escape(c.industry),
+            escape(c.area),
+            escape(c.job_title),
+            escape(c.salary_text),
+            escape(c.address),
+            escape(c.establishment),
+            escape(c.employees),
+            escape(c.url)
+        ].join(','));
+
+        const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\n'); // BOM for Excel
+
+        const { filePath } = await dialog.showSaveDialog({
+            title: 'CSVを保存',
+            defaultPath: `companies_${new Date().toISOString().split('T')[0]}.csv`,
+            filters: [{ name: 'CSV Files', extensions: ['csv'] }]
+        });
+
+        if (filePath) {
+            fs.writeFileSync(filePath, csvContent);
+            return { success: true, message: `保存しました: ${filePath}` };
+        } else {
+            return { success: false, error: 'キャンセルされました' };
+        }
+    } catch (error) {
+        console.error('Export error:', error);
+        return { success: false, error: String(error) };
+    }
 });
 
 // Google Maps API Enrichment

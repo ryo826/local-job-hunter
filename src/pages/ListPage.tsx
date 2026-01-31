@@ -17,7 +17,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { ExternalLink, Eye, Phone, Loader2 } from 'lucide-react';
+import { ExternalLink, Eye, Phone, Loader2, Download } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import type { Company } from '@/types';
 import { formatCompanyData } from '@/utils/companyFormatter';
@@ -36,6 +36,12 @@ export function ListPage() {
     const [enrichProgress, setEnrichProgress] = useState<{ current: number; total: number; companyName: string } | null>(null);
     const [enrichStats, setEnrichStats] = useState<{ withPhone: number; withoutPhone: number } | null>(null);
 
+    // Filters
+    const [areaFilter, setAreaFilter] = useState(filters.area || 'all');
+    const [jobTitleFilter, setJobTitleFilter] = useState(filters.jobTitle || 'all');
+    const [availableAreas, setAvailableAreas] = useState<string[]>([]);
+    const [availableJobTitles, setAvailableJobTitles] = useState<string[]>([]);
+
     useEffect(() => {
         fetchCompanies();
         loadEnrichStats();
@@ -45,6 +51,12 @@ export function ListPage() {
     const loadEnrichStats = async () => {
         const stats = await window.electronAPI.enrich.getStats();
         setEnrichStats({ withPhone: stats.withPhone, withoutPhone: stats.withoutPhone });
+
+        // Load filter options
+        const areas = await window.electronAPI.db.getDistinctAreas();
+        setAvailableAreas(areas);
+        const titles = await window.electronAPI.db.getDistinctJobTitles();
+        setAvailableJobTitles(titles);
     };
 
     // Handle phone number lookup via Google Maps API
@@ -78,15 +90,30 @@ export function ListPage() {
         }
     };
 
+    const handleExportCsv = async () => {
+        const targetIds = selectedRows.size > 0 ? Array.from(selectedRows) : undefined;
+        // If no rows selected, export all matching current filters
+        const exportFilters = targetIds ? undefined : filters;
+
+        const result = await window.electronAPI.export.csv(targetIds, exportFilters);
+        if (result.success) {
+            alert(result.message || 'CSVエクスポートが完了しました');
+        } else {
+            alert(`エラー: ${result.error}`);
+        }
+    };
+
     useEffect(() => {
         const timer = setTimeout(() => {
             setFilters({
                 search: searchQuery || undefined,
                 status: statusFilter !== 'all' ? statusFilter : undefined,
+                area: areaFilter !== 'all' ? areaFilter : undefined,
+                jobTitle: jobTitleFilter !== 'all' ? jobTitleFilter : undefined,
             });
         }, 300);
         return () => clearTimeout(timer);
-    }, [searchQuery, statusFilter]);
+    }, [searchQuery, statusFilter, areaFilter, jobTitleFilter]);
 
     const toggleRowSelection = (id: number) => {
         setSelectedRows((prev) => {
@@ -183,6 +210,10 @@ export function ListPage() {
                     <Button variant="outline" size="sm" onClick={() => fetchCompanies()}>
                         更新
                     </Button>
+                    <Button variant="outline" size="sm" onClick={handleExportCsv}>
+                        <Download className="h-4 w-4 mr-1" />
+                        CSV出力
+                    </Button>
                 </div>
             </div>
 
@@ -207,6 +238,28 @@ export function ListPage() {
                         <SelectItem value="ng">NG</SelectItem>
                     </SelectContent>
                 </Select>
+                <Select value={areaFilter} onValueChange={setAreaFilter}>
+                    <SelectTrigger className="w-32 h-8 text-sm">
+                        <SelectValue placeholder="エリア" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">全エリア</SelectItem>
+                        {availableAreas.map(area => (
+                            <SelectItem key={area} value={area}>{area}</SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+                <Select value={jobTitleFilter} onValueChange={setJobTitleFilter}>
+                    <SelectTrigger className="w-40 h-8 text-sm">
+                        <SelectValue placeholder="職種" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">全職種</SelectItem>
+                        {availableJobTitles.map(title => (
+                            <SelectItem key={title} value={title}>{title.substring(0, 20)}</SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
             </div>
 
             {/* Compact Table */}
@@ -223,6 +276,7 @@ export function ListPage() {
                                 </th>
                                 <th className="p-2 text-left font-medium w-[160px]">会社名</th>
                                 <th className="p-2 text-left font-medium w-[40px]">詳細</th>
+                                <th className="p-2 text-left font-medium w-[40px]">HP</th>
                                 <th className="p-2 text-left font-medium w-[100px]">電話番号</th>
                                 <th className="p-2 text-left font-medium w-[100px]">業種</th>
                                 <th className="p-2 text-left font-medium w-[60px]">エリア</th>
@@ -273,6 +327,23 @@ export function ListPage() {
                                             >
                                                 <Eye className="h-3 w-3" />
                                             </Button>
+                                        </td>
+
+                                        {/* HPリンク */}
+                                        <td className="p-2">
+                                            {company.homepage_url ? (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-6 w-6 p-0"
+                                                    onClick={() => window.open(company.homepage_url!, '_blank')}
+                                                    title="企業HP"
+                                                >
+                                                    <ExternalLink className="h-3 w-3 text-blue-500" />
+                                                </Button>
+                                            ) : (
+                                                <span className="text-muted-foreground">-</span>
+                                            )}
                                         </td>
 
                                         {/* 電話番号 */}

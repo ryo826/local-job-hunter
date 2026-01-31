@@ -27,6 +27,9 @@ export interface Company {
 export type CompanyFilters = {
     search?: string;
     status?: string;
+    source?: string;
+    area?: string;
+    jobTitle?: string;
 };
 
 export interface ScrapingOptions {

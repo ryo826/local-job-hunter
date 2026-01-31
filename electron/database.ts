@@ -153,11 +153,24 @@ export const companyRepository = {
         let query = 'SELECT * FROM companies WHERE 1=1';
         const params: any[] = [];
 
-        if (filters.status) {
-            if (filters.status !== 'all') {
-                query += ' AND status = ?';
-                params.push(filters.status);
-            }
+        if (filters.status && filters.status !== 'all') {
+            query += ' AND status = ?';
+            params.push(filters.status);
+        }
+
+        if (filters.source) {
+            query += ' AND source = ?';
+            params.push(filters.source);
+        }
+
+        if (filters.area && filters.area !== 'all') {
+            query += ' AND area LIKE ?';
+            params.push(`%${filters.area}%`);
+        }
+
+        if (filters.jobTitle && filters.jobTitle !== 'all') {
+            query += ' AND job_title LIKE ?';
+            params.push(`%${filters.jobTitle}%`);
         }
 
         if (filters.search) {
@@ -206,36 +219,23 @@ export const companyRepository = {
                 'employees', 'revenue', 'phone', 'contact_form_url', 'address',
                 'last_seen_at'
             ];
+
             // Note: source column doesn't exist in type definition but is useful for filtering? 
             // Adding it to schema might be needed if source breakdown is required.
-            // Current schema in Types doesn't have source. Let's check types.ts.
-            // types.ts doesn't have source. But dashboard uses it. 
-            // Let's add source to schema as well.
-
-            // Re-checking types.ts: User removed source from types.ts?
-            // Ah, I need to add 'source' to types.ts and schema.
-            // Ignoring for now to fix types.ts first in next tool call or adding here?
-            // I should update types.ts first. But I am in write_to_file.
-            // Let's assume 'source' is needed because Dashboard depends on it.
-
-            // Let's stick to the prompt's schema requirements. 
-            // "source" was NOT in the user prompt's list explicitly but was there before.
-            // Dashboard uses it. So keeping it is safer.
-            // But user provided specific schema. 
-            // "2. Scraping Logic" -> "Target ... status: Default 'New'"
-            // I'll follow strict prompt schema and add 'source' if needed for compatibility?
-            // User prompt says: "1. Database Schema ... - status ... - phone ... - last_seen_at"
-            // It does NOT list 'source'.
-            // However, scraping usually tracks source.
-            // I will add 'source' column implicitly to avoid breaking existing Dashboard logic.
 
             const insertData = { ...company, last_seen_at: new Date().toISOString() };
-            const columns = Object.keys(insertData).join(', ');
-            const placeholders = Object.keys(insertData).map(() => '?').join(', ');
-            const values = Object.values(insertData);
+
+            // Filter insertData to only include known keys to avoid SQL errors if partial object has extra fields
+            // Actually, we should just dynamic insert based on keys capable in DB.
+            // But strict list is safer.
+
+            // Simply use the provided keys list for columns, and extract values from insertData
+            const columns = keys;
+            const placeholders = keys.map(() => '?').join(', ');
+            const values = keys.map(k => (insertData as any)[k]);
 
             try {
-                database.prepare(`INSERT INTO companies (${columns}) VALUES (${placeholders})`).run(...values);
+                database.prepare(`INSERT INTO companies (${columns.join(', ')}) VALUES (${placeholders})`).run(...values);
                 return { isNew: true };
             } catch (e) {
                 console.error('Insert failed', e);
@@ -281,5 +281,17 @@ export const companyRepository = {
         const database = getDb();
         const result = database.prepare('SELECT 1 FROM companies WHERE url = ?').get(url);
         return !!result;
+    },
+
+    getDistinctAreas: (): string[] => {
+        const database = getDb();
+        const results = database.prepare('SELECT DISTINCT area FROM companies WHERE area IS NOT NULL AND area != "" ORDER BY area').all() as { area: string }[];
+        return results.map(r => r.area);
+    },
+
+    getDistinctJobTitles: (): string[] => {
+        const database = getDb();
+        const results = database.prepare('SELECT DISTINCT job_title FROM companies WHERE job_title IS NOT NULL AND job_title != "" ORDER BY job_title').all() as { job_title: string }[];
+        return results.map(r => r.job_title);
     }
 };
