@@ -15,6 +15,7 @@ export interface Company {
     employees: string | null;
     revenue: string | null;
     phone: string | null;
+    email: string | null;
     contact_form_url: string | null;
     address: string | null;
     ai_summary: string | null;
@@ -56,6 +57,7 @@ export interface IElectronAPI {
         getCompanies: (filters: CompanyFilters) => Promise<Company[]>;
         getCompany: (id: number) => Promise<Company | null>;
         updateCompany: (id: number, updates: Partial<Company>) => Promise<void>;
+        exportCsv: (options?: { ids?: number[] }) => Promise<{ success: boolean; error?: string; path?: string }>;
     };
     ai: {
         analyze: (id: number) => Promise<{ success: boolean; data?: { summary: string; tags: string[] }; error?: string }>;

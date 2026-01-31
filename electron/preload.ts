@@ -4,8 +4,6 @@ export interface CompanyFilters {
     search?: string;
     status?: string;
     source?: string;
-    area?: string;
-    jobTitle?: string;
 }
 
 export interface Company {
@@ -24,6 +22,7 @@ export interface Company {
     employees?: string;
     revenue?: string;
     phone?: string;
+    email?: string;
     contact_form_url?: string;
     ai_summary?: string;
     ai_tags?: string;
@@ -69,8 +68,8 @@ const electronAPI = {
             ipcRenderer.invoke('db:getCompany', id),
         updateCompany: (id: number, updates: Partial<Company>): Promise<{ success: boolean }> =>
             ipcRenderer.invoke('db:updateCompany', id, updates),
-        getDistinctAreas: (): Promise<string[]> => ipcRenderer.invoke('db:getDistinctAreas'),
-        getDistinctJobTitles: (): Promise<string[]> => ipcRenderer.invoke('db:getDistinctJobTitles'),
+        exportCsv: (options?: { ids?: number[] }): Promise<{ success: boolean; error?: string; path?: string }> =>
+            ipcRenderer.invoke('db:exportCsv', options),
     },
     scraper: {
         start: (options: ScrapingOptions): Promise<{ success: boolean; error?: string }> =>
@@ -107,10 +106,6 @@ const electronAPI = {
         offLog: () => {
             ipcRenderer.removeAllListeners('enrich:log');
         },
-    },
-    export: {
-        csv: (ids?: number[], filters?: CompanyFilters): Promise<{ success: boolean; message?: string; error?: string }> =>
-            ipcRenderer.invoke('export:csv', ids, filters),
     },
 };
 
