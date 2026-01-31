@@ -70,6 +70,8 @@ const electronAPI = {
             ipcRenderer.invoke('db:updateCompany', id, updates),
         exportCsv: (options?: { ids?: number[] }): Promise<{ success: boolean; error?: string; path?: string }> =>
             ipcRenderer.invoke('db:exportCsv', options),
+        deleteAll: (): Promise<{ success: boolean; deleted?: number; error?: string }> =>
+            ipcRenderer.invoke('db:deleteAll'),
     },
     scraper: {
         start: (options: ScrapingOptions): Promise<{ success: boolean; error?: string }> =>

@@ -75,6 +75,15 @@ ipcMain.handle('db:exportCsv', async (_event, options) => {
     }
 });
 
+ipcMain.handle('db:deleteAll', async () => {
+    try {
+        const deleted = companyRepository.deleteAll();
+        return { success: true, deleted };
+    } catch (error) {
+        return { success: false, error: String(error) };
+    }
+});
+
 ipcMain.handle('scraper:start', async (_event, options) => {
     if (scrapingEngine) {
         return { success: false, error: 'Scraping already in progress' };

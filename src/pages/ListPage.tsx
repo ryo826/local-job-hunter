@@ -17,37 +17,33 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { ExternalLink, Eye, Phone, Loader2, Download } from 'lucide-react';
+import { ExternalLink, Eye, Phone, Loader2, Download, ChevronDown, ChevronUp } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import type { Company } from '@/types';
 import { formatCompanyData } from '@/utils/companyFormatter';
 
-// Region options for filtering
-const regionOptions = [
-    { value: 'all', label: 'すべて' },
-    { value: '北海道', label: '北海道' },
-    { value: '東北', label: '東北' },
-    { value: '関東', label: '関東' },
-    { value: '甲信越', label: '甲信越' },
-    { value: '東海', label: '東海' },
-    { value: '関西', label: '関西' },
-    { value: '中国・四国', label: '中国・四国' },
-    { value: '九州・沖縄', label: '九州・沖縄' },
+// Filter tab options
+type FilterTab = '勤務地' | '職種' | 'こだわり条件' | '雇用形態' | '年収';
+
+// Region checkbox options
+const regionCheckboxOptions = [
+    '北海道', '東北', '関東', '甲信越', '北陸',
+    '東海', '関西', '中国', '四国', '九州・沖縄'
 ];
 
-// Job type options for filtering
-const jobTypeOptions = [
-    { value: 'all', label: 'すべて' },
-    { value: '営業・販売', label: '営業・販売' },
-    { value: 'IT・Web', label: 'IT・Web' },
-    { value: '製造・工場', label: '製造・工場' },
-    { value: '医療・介護', label: '医療・介護' },
-    { value: '事務・管理', label: '事務・管理' },
-    { value: '建築・土木', label: '建築・土木' },
-    { value: '飲食・サービス', label: '飲食・サービス' },
-    { value: '教育・保育', label: '教育・保育' },
-    { value: 'その他', label: 'その他' },
+// Job type checkbox options (based on screenshot)
+const jobTypeCheckboxOptions = [
+    '営業・販売',
+    '経営・事業企画・人事・事務',
+    'IT・Web・ゲームエンジニア',
+    'モノづくりエンジニア',
+    'コンサルタント・士業・金融',
+    'サービス・販売・接客',
+    '不動産・建設',
+    '物流・運輸・運転',
+    'その他'
 ];
+
 
 // Map prefectures to regions
 const prefectureToRegion: Record<string, string> = {
@@ -55,10 +51,11 @@ const prefectureToRegion: Record<string, string> = {
     '青森県': '東北', '岩手県': '東北', '宮城県': '東北', '秋田県': '東北', '山形県': '東北', '福島県': '東北',
     '茨城県': '関東', '栃木県': '関東', '群馬県': '関東', '埼玉県': '関東', '千葉県': '関東', '東京都': '関東', '神奈川県': '関東',
     '新潟県': '甲信越', '山梨県': '甲信越', '長野県': '甲信越',
-    '富山県': '東海', '石川県': '東海', '福井県': '東海', '岐阜県': '東海', '静岡県': '東海', '愛知県': '東海', '三重県': '東海',
+    '富山県': '北陸', '石川県': '北陸', '福井県': '北陸',
+    '岐阜県': '東海', '静岡県': '東海', '愛知県': '東海', '三重県': '東海',
     '滋賀県': '関西', '京都府': '関西', '大阪府': '関西', '兵庫県': '関西', '奈良県': '関西', '和歌山県': '関西',
-    '鳥取県': '中国・四国', '島根県': '中国・四国', '岡山県': '中国・四国', '広島県': '中国・四国', '山口県': '中国・四国',
-    '徳島県': '中国・四国', '香川県': '中国・四国', '愛媛県': '中国・四国', '高知県': '中国・四国',
+    '鳥取県': '中国', '島根県': '中国', '岡山県': '中国', '広島県': '中国', '山口県': '中国',
+    '徳島県': '四国', '香川県': '四国', '愛媛県': '四国', '高知県': '四国',
     '福岡県': '九州・沖縄', '佐賀県': '九州・沖縄', '長崎県': '九州・沖縄', '熊本県': '九州・沖縄',
     '大分県': '九州・沖縄', '宮崎県': '九州・沖縄', '鹿児島県': '九州・沖縄', '沖縄県': '九州・沖縄',
 };
@@ -68,12 +65,14 @@ export function ListPage() {
 
     const [searchQuery, setSearchQuery] = useState(filters.search || '');
     const [statusFilter, setStatusFilter] = useState(filters.status || 'all');
-    const [regionFilter, setRegionFilter] = useState('all');
-    const [jobTypeFilter, setJobTypeFilter] = useState('all');
+    const [selectedRegions, setSelectedRegions] = useState<Set<string>>(new Set());
+    const [selectedJobTypes, setSelectedJobTypes] = useState<Set<string>>(new Set());
     const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
     const [detailCompany, setDetailCompany] = useState<Company | null>(null);
     const [isDetailOpen, setIsDetailOpen] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
+    const [activeFilterTab, setActiveFilterTab] = useState<FilterTab>('勤務地');
+    const [isFilterExpanded, setIsFilterExpanded] = useState(true);
 
     // Phone enrichment state
     const [isEnriching, setIsEnriching] = useState(false);
@@ -153,43 +152,71 @@ export function ListPage() {
         }
     };
 
+    // Toggle checkbox selection
+    const toggleRegion = (region: string) => {
+        setSelectedRegions(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(region)) {
+                newSet.delete(region);
+            } else {
+                newSet.add(region);
+            }
+            return newSet;
+        });
+    };
+
+    const toggleJobType = (jobType: string) => {
+        setSelectedJobTypes(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(jobType)) {
+                newSet.delete(jobType);
+            } else {
+                newSet.add(jobType);
+            }
+            return newSet;
+        });
+    };
+
     // Filter companies by region and job type (client-side filtering)
     const filteredCompanies = companies.filter(company => {
-        // Region filter
-        if (regionFilter !== 'all') {
+        // Region filter (if any regions selected)
+        if (selectedRegions.size > 0) {
             const companyRegion = company.area ? prefectureToRegion[company.area] : null;
-            if (companyRegion !== regionFilter) {
+            if (!companyRegion || !selectedRegions.has(companyRegion)) {
                 return false;
             }
         }
 
-        // Job type filter (simple keyword matching in job_title)
-        if (jobTypeFilter !== 'all') {
+        // Job type filter (if any job types selected)
+        if (selectedJobTypes.size > 0) {
             const jobTitle = company.job_title?.toLowerCase() || '';
             const industry = company.industry?.toLowerCase() || '';
             const searchText = jobTitle + ' ' + industry;
 
             const jobTypeKeywords: Record<string, string[]> = {
                 '営業・販売': ['営業', '販売', 'セールス', 'sales'],
-                'IT・Web': ['it', 'web', 'エンジニア', 'プログラマ', 'システム', '開発'],
-                '製造・工場': ['製造', '工場', '生産', 'ライン', '組立'],
-                '医療・介護': ['医療', '介護', '看護', '福祉', 'ヘルパー', '病院'],
-                '事務・管理': ['事務', '管理', '経理', '総務', '人事', 'オフィス'],
-                '建築・土木': ['建築', '土木', '施工', '現場', '設計'],
-                '飲食・サービス': ['飲食', 'レストラン', 'ホテル', '接客', 'サービス'],
-                '教育・保育': ['教育', '保育', '講師', '先生', '塾'],
+                '経営・事業企画・人事・事務': ['経営', '事業企画', '人事', '事務', '経理', '総務', '管理'],
+                'IT・Web・ゲームエンジニア': ['it', 'web', 'エンジニア', 'プログラマ', 'システム', '開発', 'ゲーム'],
+                'モノづくりエンジニア': ['製造', '工場', '機械', '電気', '電子', '設計', '品質'],
+                'コンサルタント・士業・金融': ['コンサル', '士業', '金融', '銀行', '証券', '保険', '会計'],
+                'サービス・販売・接客': ['サービス', '販売', '接客', '飲食', 'ホテル', '店舗'],
+                '不動産・建設': ['不動産', '建設', '建築', '土木', '施工'],
+                '物流・運輸・運転': ['物流', '運輸', '運転', 'ドライバー', '配送', '倉庫'],
             };
 
-            const keywords = jobTypeKeywords[jobTypeFilter];
-            if (keywords) {
-                const matches = keywords.some(kw => searchText.includes(kw));
-                if (!matches) return false;
-            } else if (jobTypeFilter === 'その他') {
-                // その他: 他のカテゴリに該当しない
-                const allKeywords = Object.values(jobTypeKeywords).flat();
-                const matchesAny = allKeywords.some(kw => searchText.includes(kw));
-                if (matchesAny) return false;
-            }
+            // Check if any of the selected job types match
+            const matchesAnySelected = Array.from(selectedJobTypes).some(selectedType => {
+                const keywords = jobTypeKeywords[selectedType];
+                if (keywords) {
+                    return keywords.some(kw => searchText.includes(kw));
+                } else if (selectedType === 'その他') {
+                    const allKeywords = Object.values(jobTypeKeywords).flat();
+                    return !allKeywords.some(kw => searchText.includes(kw));
+                }
+                return false;
+            });
+
+            if (!matchesAnySelected) return false;
         }
 
         return true;
@@ -311,7 +338,7 @@ export function ListPage() {
                 </div>
             </div>
 
-            {/* Filters */}
+            {/* Basic Search and Status Filter */}
             <div className="flex flex-wrap gap-2">
                 <Input
                     className="flex-1 min-w-[200px] h-8 text-sm"
@@ -332,27 +359,103 @@ export function ListPage() {
                         <SelectItem value="ng">NG</SelectItem>
                     </SelectContent>
                 </Select>
-                <Select value={regionFilter} onValueChange={setRegionFilter}>
-                    <SelectTrigger className="w-32 h-8 text-sm">
-                        <SelectValue placeholder="勤務地" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        {regionOptions.map(opt => (
-                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
-                <Select value={jobTypeFilter} onValueChange={setJobTypeFilter}>
-                    <SelectTrigger className="w-32 h-8 text-sm">
-                        <SelectValue placeholder="職種" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        {jobTypeOptions.map(opt => (
-                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8"
+                    onClick={() => setIsFilterExpanded(!isFilterExpanded)}
+                >
+                    詳細フィルター
+                    {isFilterExpanded ? <ChevronUp className="ml-1 h-4 w-4" /> : <ChevronDown className="ml-1 h-4 w-4" />}
+                </Button>
             </div>
+
+            {/* Expandable Filter Section with Tabs */}
+            {isFilterExpanded && (
+                <Card className="p-4">
+                    {/* Filter Tabs */}
+                    <div className="flex gap-1 mb-4 border-b">
+                        {(['勤務地', '職種'] as FilterTab[]).map(tab => (
+                            <button
+                                key={tab}
+                                className={`px-4 py-2 text-sm font-medium transition-colors ${
+                                    activeFilterTab === tab
+                                        ? 'border-b-2 border-blue-500 text-blue-600'
+                                        : 'text-gray-500 hover:text-gray-700'
+                                }`}
+                                onClick={() => setActiveFilterTab(tab)}
+                            >
+                                {tab}
+                                {tab === '勤務地' && selectedRegions.size > 0 && (
+                                    <span className="ml-1 text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full">
+                                        {selectedRegions.size}
+                                    </span>
+                                )}
+                                {tab === '職種' && selectedJobTypes.size > 0 && (
+                                    <span className="ml-1 text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full">
+                                        {selectedJobTypes.size}
+                                    </span>
+                                )}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Filter Content */}
+                    <div className="min-h-[100px]">
+                        {/* 勤務地 Tab */}
+                        {activeFilterTab === '勤務地' && (
+                            <div className="grid grid-cols-5 gap-3">
+                                {regionCheckboxOptions.map(region => (
+                                    <label
+                                        key={region}
+                                        className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded"
+                                    >
+                                        <Checkbox
+                                            checked={selectedRegions.has(region)}
+                                            onCheckedChange={() => toggleRegion(region)}
+                                        />
+                                        <span className="text-sm">{region}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* 職種 Tab */}
+                        {activeFilterTab === '職種' && (
+                            <div className="grid grid-cols-3 gap-3">
+                                {jobTypeCheckboxOptions.map(jobType => (
+                                    <label
+                                        key={jobType}
+                                        className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded"
+                                    >
+                                        <Checkbox
+                                            checked={selectedJobTypes.has(jobType)}
+                                            onCheckedChange={() => toggleJobType(jobType)}
+                                        />
+                                        <span className="text-sm">{jobType}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Clear Filters Button */}
+                    {(selectedRegions.size > 0 || selectedJobTypes.size > 0) && (
+                        <div className="mt-4 pt-3 border-t flex justify-end">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                    setSelectedRegions(new Set());
+                                    setSelectedJobTypes(new Set());
+                                }}
+                            >
+                                フィルターをクリア
+                            </Button>
+                        </div>
+                    )}
+                </Card>
+            )}
 
             {/* Compact Table */}
             <Card className="overflow-hidden">
@@ -369,6 +472,7 @@ export function ListPage() {
                                 <th className="p-2 text-left font-medium w-[160px]">会社名</th>
                                 <th className="p-2 text-left font-medium w-[40px]">詳細</th>
                                 <th className="p-2 text-left font-medium w-[100px]">電話番号</th>
+                                <th className="p-2 text-left font-medium w-[80px]">会社HP</th>
                                 <th className="p-2 text-left font-medium w-[100px]">業種</th>
                                 <th className="p-2 text-left font-medium w-[60px]">エリア</th>
                                 <th className="p-2 text-left font-medium w-[90px]">給与</th>
@@ -430,6 +534,24 @@ export function ListPage() {
                                                 >
                                                     {company.phone}
                                                 </span>
+                                            ) : (
+                                                <span className="text-muted-foreground">-</span>
+                                            )}
+                                        </td>
+
+                                        {/* 会社HP */}
+                                        <td className="p-2">
+                                            {company.homepage_url ? (
+                                                <a
+                                                    href={company.homepage_url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                                                    title={company.homepage_url}
+                                                >
+                                                    <ExternalLink className="h-3 w-3" />
+                                                    <span className="text-xs">HP</span>
+                                                </a>
                                             ) : (
                                                 <span className="text-muted-foreground">-</span>
                                             )}
