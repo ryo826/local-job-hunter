@@ -358,21 +358,40 @@ export class MynaviStrategy implements ScrapingStrategy {
                 try {
                     const nextUrl = await nextButton.getAttribute('href');
                     if (nextUrl) {
-                        // URL正規化: 二重ドメインや不正なパスを修正
-                        let fullNextUrl: string;
-                        if (nextUrl.startsWith('http')) {
-                            fullNextUrl = nextUrl;
-                        } else if (nextUrl.startsWith('//')) {
-                            // プロトコル相対URL (//tenshoku.mynavi.jp/...)
-                            fullNextUrl = `https:${nextUrl}`;
-                        } else if (nextUrl.startsWith('/')) {
-                            // 絶対パス
-                            fullNextUrl = `https://tenshoku.mynavi.jp${nextUrl}`;
+                        // ページ番号を抽出 (例: /list/pg2/ -> pg2)
+                        const pageMatch = nextUrl.match(/pg(\d+)/);
+                        if (pageMatch) {
+                            // 元のsearchUrlにページ番号を追加して検索条件を保持
+                            const url = new URL(searchUrl);
+                            // パス部分にページ番号を挿入 (/list/ -> /list/pg2/)
+                            if (!url.pathname.includes('/pg')) {
+                                url.pathname = url.pathname.replace(/\/$/, '') + `/pg${pageMatch[1]}/`;
+                            } else {
+                                url.pathname = url.pathname.replace(/pg\d+/, `pg${pageMatch[1]}`);
+                            }
+                            currentSearchUrl = url.toString();
                         } else {
-                            // 相対パス
-                            fullNextUrl = `https://tenshoku.mynavi.jp/${nextUrl}`;
+                            // ページ番号が見つからない場合は従来の方法
+                            let fullNextUrl: string;
+                            if (nextUrl.startsWith('http')) {
+                                fullNextUrl = nextUrl;
+                            } else if (nextUrl.startsWith('//')) {
+                                fullNextUrl = `https:${nextUrl}`;
+                            } else if (nextUrl.startsWith('/')) {
+                                fullNextUrl = `https://tenshoku.mynavi.jp${nextUrl}`;
+                            } else {
+                                fullNextUrl = `https://tenshoku.mynavi.jp/${nextUrl}`;
+                            }
+                            // 元のクエリパラメータを追加
+                            const originalUrl = new URL(searchUrl);
+                            const nextUrlObj = new URL(fullNextUrl);
+                            originalUrl.searchParams.forEach((value, key) => {
+                                if (!nextUrlObj.searchParams.has(key)) {
+                                    nextUrlObj.searchParams.set(key, value);
+                                }
+                            });
+                            currentSearchUrl = nextUrlObj.toString();
                         }
-                        currentSearchUrl = fullNextUrl;
                         log(`Navigating to next page: ${currentSearchUrl}`);
                         await page.goto(currentSearchUrl, { waitUntil: 'networkidle', timeout: 30000 });
                         await page.waitForTimeout(randomDelay(3000, 5000));
