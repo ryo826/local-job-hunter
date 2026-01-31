@@ -250,7 +250,7 @@ export class DodaStrategy implements ScrapingStrategy {
                     }
 
                     // 企業情報を抽出 (DescriptionList構造)
-                    const companyUrl = await this.extractCompanyUrl(page);
+                    const companyUrl = await this.extractCompanyUrl(page, log);
                     const address = await this.extractDescriptionValue(page, '本社所在地') ||
                         await this.extractDescriptionValue(page, '所在地') ||
                         await this.extractDescriptionValue(page, '勤務地');
@@ -389,24 +389,51 @@ export class DodaStrategy implements ScrapingStrategy {
     }
 
     // 企業URLを抽出 (DescriptionList内の企業URLリンク)
-    private async extractCompanyUrl(page: Page): Promise<string | undefined> {
+    private async extractCompanyUrl(page: Page, log: (msg: string) => void): Promise<string | undefined> {
         try {
-            // 企業URLセクションのリンクを探す
-            const companyLink = page.locator('a.jobSearchDetail-companyOverview__link').first();
-            if (await companyLink.count() > 0) {
-                const href = await companyLink.getAttribute('href');
-                if (href && !href.includes('doda.jp')) {
-                    return href;
+            // 企業URLセクションのリンクを探す（複数のセレクターを試す）
+            const linkSelectors = [
+                'a.jobSearchDetail-companyOverview__link',
+                'a[class*="companyOverview__link"]',
+                'a[class*="companyUrl"]',
+                'a[class*="corporateUrl"]',
+            ];
+
+            for (const selector of linkSelectors) {
+                const companyLink = page.locator(selector).first();
+                if (await companyLink.count() > 0) {
+                    const href = await companyLink.getAttribute('href');
+                    if (href && !href.includes('doda.jp')) {
+                        log(`Found company URL via selector ${selector}: ${href}`);
+                        return href;
+                    }
                 }
             }
 
-            // フォールバック: DescriptionListから企業URLを探す
-            const urlValue = await this.extractDescriptionValue(page, '企業URL');
-            if (urlValue) {
-                // URLを抽出 (テキストからURLを取り出す)
-                const urlMatch = urlValue.match(/https?:\/\/[^\s<>"]+/);
-                if (urlMatch) {
-                    return urlMatch[0];
+            // フォールバック: DescriptionListから企業URLを探す（複数のラベル名を試す）
+            const labels = ['企業URL', '企業HP', 'ホームページ', 'HP', '企業ホームページ', 'WEBサイト', 'Webサイト', '公式サイト', 'URL'];
+            for (const label of labels) {
+                const urlValue = await this.extractDescriptionValue(page, label);
+                if (urlValue) {
+                    // URLを抽出 (テキストからURLを取り出す)
+                    const urlMatch = urlValue.match(/https?:\/\/[^\s<>"]+/);
+                    if (urlMatch) {
+                        log(`Found company URL via label "${label}": ${urlMatch[0]}`);
+                        return urlMatch[0];
+                    }
+                }
+            }
+
+            // さらにフォールバック: ページ内のすべての外部リンクを探す
+            const allLinks = await page.locator('a[href^="http"]').all();
+            for (const link of allLinks) {
+                const href = await link.getAttribute('href');
+                if (href && !href.includes('doda.jp') && !href.includes('google') && !href.includes('facebook') && !href.includes('twitter')) {
+                    const text = await link.textContent();
+                    if (text && (text.includes('公式') || text.includes('ホームページ') || text.includes('HP') || text.includes('サイト'))) {
+                        log(`Found company URL via link text: ${href}`);
+                        return href;
+                    }
                 }
             }
         } catch (error) {

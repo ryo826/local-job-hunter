@@ -292,10 +292,16 @@ export class RikunabiStrategy implements ScrapingStrategy {
                     // 企業情報を抽出
                     const companyInfo = await this.extractCompanyInfo(page, log);
 
+                    // デバッグ: 抽出されたキーを表示
+                    log(`Company info keys: ${Object.keys(companyInfo).join(', ')}`);
+
                     // データを統合
                     const address = companyInfo['本社所在地'] || jobDetails['勤務地'] || '';
                     const normalizedAddress = this.normalizeAddress(address);
                     const cleanName = this.cleanCompanyName(companyName);
+
+                    // 企業HPを複数のラベル名で検索
+                    const homepageUrl = companyInfo['企業HP'] || companyInfo['ホームページ'] || companyInfo['HP'] || companyInfo['企業ホームページ'] || companyInfo['WEBサイト'] || companyInfo['Webサイト'] || companyInfo['公式サイト'] || '';
 
                     yield {
                         source: this.source,
@@ -310,7 +316,7 @@ export class RikunabiStrategy implements ScrapingStrategy {
                         phone: companyInfo['企業代表番号'] || '',
                         address: normalizedAddress,
                         area: normalizeArea(this.extractAreaFromAddress(normalizedAddress)),
-                        homepage_url: companyInfo['企業HP'] || '',
+                        homepage_url: homepageUrl,
                         industry: normalizeIndustry(companyInfo['事業内容']),
                         scrape_status: 'step1_completed',
                     };
