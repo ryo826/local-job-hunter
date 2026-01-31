@@ -6,6 +6,36 @@ function randomDelay(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// リクナビNEXT都道府県コードマッピング
+const prefectureCodes: Record<string, string> = {
+    '北海道': '01',
+    '青森県': '02', '岩手県': '03', '宮城県': '04', '秋田県': '05', '山形県': '06', '福島県': '07',
+    '茨城県': '08', '栃木県': '09', '群馬県': '10', '埼玉県': '11', '千葉県': '12', '東京都': '13', '神奈川県': '14',
+    '新潟県': '15', '山梨県': '19', '長野県': '20',
+    '富山県': '16', '石川県': '17', '福井県': '18',
+    '岐阜県': '21', '静岡県': '22', '愛知県': '23', '三重県': '24',
+    '滋賀県': '25', '京都府': '26', '大阪府': '27', '兵庫県': '28', '奈良県': '29', '和歌山県': '30',
+    '鳥取県': '31', '島根県': '32', '岡山県': '33', '広島県': '34', '山口県': '35',
+    '徳島県': '36', '香川県': '37', '愛媛県': '38', '高知県': '39',
+    '福岡県': '40', '佐賀県': '41', '長崎県': '42', '熊本県': '43', '大分県': '44', '宮崎県': '45', '鹿児島県': '46', '沖縄県': '47',
+};
+
+// リクナビNEXT職種カテゴリマッピング
+const jobTypeCodes: Record<string, string> = {
+    '営業・販売': '100',
+    '経営・事業企画・人事・事務': '200',
+    'IT・Web・ゲームエンジニア': '300',
+    'モノづくりエンジニア': '400',
+    'コンサルタント・士業・金融': '500',
+    'サービス・販売・接客': '600',
+    '不動産・建設': '700',
+    '物流・運輸・運転': '800',
+    '医療・福祉・介護': '900',
+    'クリエイティブ・マスコミ': '1000',
+    '教育・保育': '1100',
+    'その他': '9900',
+};
+
 export class RikunabiStrategy implements ScrapingStrategy {
     readonly source = 'rikunabi';
 
@@ -14,7 +44,7 @@ export class RikunabiStrategy implements ScrapingStrategy {
     private readonly PAGE_INTERVAL = 5000;     // 5秒
 
     async *scrape(page: Page, params: ScrapingParams, onLog?: (message: string) => void): AsyncGenerator<CompanyData> {
-        const { keywords, location } = params;
+        const { keywords, prefectures, jobTypes } = params;
 
         const log = (msg: string) => {
             if (onLog) onLog(msg);
@@ -27,7 +57,27 @@ export class RikunabiStrategy implements ScrapingStrategy {
 
         if (keywords) {
             // キーワード検索の場合
-            searchUrl = `https://next.rikunabi.com/job_search/?nw=true&kw=${encodeURIComponent(keywords)}`;
+            searchUrl += `&kw=${encodeURIComponent(keywords)}`;
+        }
+
+        // 都道府県指定（複数対応）
+        if (prefectures && prefectures.length > 0) {
+            const codes = prefectures
+                .map(pref => prefectureCodes[pref])
+                .filter(code => code);
+            if (codes.length > 0) {
+                searchUrl += `&ar=${codes.join(',')}`;
+            }
+        }
+
+        // 職種指定（複数対応）
+        if (jobTypes && jobTypes.length > 0) {
+            const codes = jobTypes
+                .map(jt => jobTypeCodes[jt])
+                .filter(code => code);
+            if (codes.length > 0) {
+                searchUrl += `&oc=${codes.join(',')}`;
+            }
         }
 
         log(`Navigating to: ${searchUrl}`);

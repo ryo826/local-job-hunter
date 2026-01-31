@@ -37,7 +37,7 @@ export class ScrapingEngine {
     }
 
     async start(
-        options: { sources: string[]; keywords?: string; location?: string },
+        options: { sources: string[]; keywords?: string; location?: string; prefectures?: string[]; jobTypes?: string[] },
         onProgress: (progress: ScrapingProgress) => void,
         onLog?: (message: string) => void
     ): Promise<{ success: boolean; error?: string }> {
@@ -67,6 +67,8 @@ export class ScrapingEngine {
             const params: ScrapingParams = {
                 keywords: options.keywords,
                 location: options.location,
+                prefectures: options.prefectures,
+                jobTypes: options.jobTypes,
             };
 
             for (const strategy of strategies) {
