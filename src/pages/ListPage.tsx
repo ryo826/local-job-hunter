@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,10 +17,14 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { ExternalLink, Eye, Phone, Loader2, Download, ChevronDown, ChevronUp } from 'lucide-react';
+import { ExternalLink, Eye, Phone, Loader2, Download, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import type { Company } from '@/types';
 import { formatCompanyData } from '@/utils/companyFormatter';
+
+// Sort types
+type SortColumn = 'industry' | 'area' | 'salary' | 'employees' | 'source' | null;
+type SortDirection = 'asc' | 'desc';
 
 // Filter tab options
 type FilterTab = '勤務地' | '職種' | 'こだわり条件' | '雇用形態' | '年収';
@@ -78,6 +82,17 @@ export function ListPage() {
     const [isEnriching, setIsEnriching] = useState(false);
     const [enrichProgress, setEnrichProgress] = useState<{ current: number; total: number; companyName: string } | null>(null);
     const [enrichStats, setEnrichStats] = useState<{ withPhone: number; withoutPhone: number } | null>(null);
+
+    // Column filters
+    const [industryFilter, setIndustryFilter] = useState<string>('all');
+    const [areaFilter, setAreaFilter] = useState<string>('all');
+    const [salaryFilter, setSalaryFilter] = useState<string>('all');
+    const [employeesFilter, setEmployeesFilter] = useState<string>('all');
+    const [sourceFilter, setSourceFilter] = useState<string>('all');
+
+    // Sorting state
+    const [sortColumn, setSortColumn] = useState<SortColumn>(null);
+    const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
     useEffect(() => {
         fetchCompanies();
@@ -177,50 +192,189 @@ export function ListPage() {
         });
     };
 
-    // Filter companies by region and job type (client-side filtering)
-    const filteredCompanies = companies.filter(company => {
-        // Region filter (if any regions selected)
-        if (selectedRegions.size > 0) {
-            const companyRegion = company.area ? prefectureToRegion[company.area] : null;
-            if (!companyRegion || !selectedRegions.has(companyRegion)) {
-                return false;
+    // Generate unique filter options from data
+    const filterOptions = useMemo(() => {
+        const industries = new Set<string>();
+        const areas = new Set<string>();
+        const sources = new Set<string>();
+
+        companies.forEach(company => {
+            if (company.industry) {
+                // 業種は最初の20文字程度で区切る
+                const shortIndustry = company.industry.substring(0, 20);
+                industries.add(shortIndustry);
             }
+            if (company.area) areas.add(company.area);
+            if (company.source) sources.add(company.source);
+        });
+
+        return {
+            industries: Array.from(industries).sort(),
+            areas: Array.from(areas).sort(),
+            sources: Array.from(sources).sort(),
+            salaryRanges: ['300万未満', '300-500万', '500-700万', '700-1000万', '1000万以上'],
+            employeeRanges: ['10人未満', '10-50人', '50-100人', '100-500人', '500人以上'],
+        };
+    }, [companies]);
+
+    // Parse salary to number for comparison
+    const parseSalary = (salaryText: string | null): number => {
+        if (!salaryText) return 0;
+        const match = salaryText.match(/(\d+)/);
+        return match ? parseInt(match[1], 10) : 0;
+    };
+
+    // Parse employees to number for comparison
+    const parseEmployees = (employeesText: string | null): number => {
+        if (!employeesText) return 0;
+        const match = employeesText.match(/(\d+)/);
+        return match ? parseInt(match[1], 10) : 0;
+    };
+
+    // Check if salary matches filter
+    const matchesSalaryFilter = (salaryText: string | null, filter: string): boolean => {
+        if (filter === 'all') return true;
+        const salary = parseSalary(salaryText);
+        switch (filter) {
+            case '300万未満': return salary < 300;
+            case '300-500万': return salary >= 300 && salary < 500;
+            case '500-700万': return salary >= 500 && salary < 700;
+            case '700-1000万': return salary >= 700 && salary < 1000;
+            case '1000万以上': return salary >= 1000;
+            default: return true;
         }
+    };
 
-        // Job type filter (if any job types selected)
-        if (selectedJobTypes.size > 0) {
-            const jobTitle = company.job_title?.toLowerCase() || '';
-            const industry = company.industry?.toLowerCase() || '';
-            const searchText = jobTitle + ' ' + industry;
+    // Check if employees matches filter
+    const matchesEmployeesFilter = (employeesText: string | null, filter: string): boolean => {
+        if (filter === 'all') return true;
+        const employees = parseEmployees(employeesText);
+        switch (filter) {
+            case '10人未満': return employees < 10;
+            case '10-50人': return employees >= 10 && employees < 50;
+            case '50-100人': return employees >= 50 && employees < 100;
+            case '100-500人': return employees >= 100 && employees < 500;
+            case '500人以上': return employees >= 500;
+            default: return true;
+        }
+    };
 
-            const jobTypeKeywords: Record<string, string[]> = {
-                '営業・販売': ['営業', '販売', 'セールス', 'sales'],
-                '経営・事業企画・人事・事務': ['経営', '事業企画', '人事', '事務', '経理', '総務', '管理'],
-                'IT・Web・ゲームエンジニア': ['it', 'web', 'エンジニア', 'プログラマ', 'システム', '開発', 'ゲーム'],
-                'モノづくりエンジニア': ['製造', '工場', '機械', '電気', '電子', '設計', '品質'],
-                'コンサルタント・士業・金融': ['コンサル', '士業', '金融', '銀行', '証券', '保険', '会計'],
-                'サービス・販売・接客': ['サービス', '販売', '接客', '飲食', 'ホテル', '店舗'],
-                '不動産・建設': ['不動産', '建設', '建築', '土木', '施工'],
-                '物流・運輸・運転': ['物流', '運輸', '運転', 'ドライバー', '配送', '倉庫'],
-            };
-
-            // Check if any of the selected job types match
-            const matchesAnySelected = Array.from(selectedJobTypes).some(selectedType => {
-                const keywords = jobTypeKeywords[selectedType];
-                if (keywords) {
-                    return keywords.some(kw => searchText.includes(kw));
-                } else if (selectedType === 'その他') {
-                    const allKeywords = Object.values(jobTypeKeywords).flat();
-                    return !allKeywords.some(kw => searchText.includes(kw));
+    // Filter companies by region, job type, and column filters (client-side filtering)
+    const filteredCompanies = useMemo(() => {
+        let result = companies.filter(company => {
+            // Region filter (if any regions selected)
+            if (selectedRegions.size > 0) {
+                const companyRegion = company.area ? prefectureToRegion[company.area] : null;
+                if (!companyRegion || !selectedRegions.has(companyRegion)) {
+                    return false;
                 }
-                return false;
-            });
+            }
 
-            if (!matchesAnySelected) return false;
+            // Job type filter (if any job types selected)
+            if (selectedJobTypes.size > 0) {
+                const jobTitle = company.job_title?.toLowerCase() || '';
+                const industry = company.industry?.toLowerCase() || '';
+                const searchText = jobTitle + ' ' + industry;
+
+                const jobTypeKeywords: Record<string, string[]> = {
+                    '営業・販売': ['営業', '販売', 'セールス', 'sales'],
+                    '経営・事業企画・人事・事務': ['経営', '事業企画', '人事', '事務', '経理', '総務', '管理'],
+                    'IT・Web・ゲームエンジニア': ['it', 'web', 'エンジニア', 'プログラマ', 'システム', '開発', 'ゲーム'],
+                    'モノづくりエンジニア': ['製造', '工場', '機械', '電気', '電子', '設計', '品質'],
+                    'コンサルタント・士業・金融': ['コンサル', '士業', '金融', '銀行', '証券', '保険', '会計'],
+                    'サービス・販売・接客': ['サービス', '販売', '接客', '飲食', 'ホテル', '店舗'],
+                    '不動産・建設': ['不動産', '建設', '建築', '土木', '施工'],
+                    '物流・運輸・運転': ['物流', '運輸', '運転', 'ドライバー', '配送', '倉庫'],
+                };
+
+                const matchesAnySelected = Array.from(selectedJobTypes).some(selectedType => {
+                    const keywords = jobTypeKeywords[selectedType];
+                    if (keywords) {
+                        return keywords.some(kw => searchText.includes(kw));
+                    } else if (selectedType === 'その他') {
+                        const allKeywords = Object.values(jobTypeKeywords).flat();
+                        return !allKeywords.some(kw => searchText.includes(kw));
+                    }
+                    return false;
+                });
+
+                if (!matchesAnySelected) return false;
+            }
+
+            // Column filters
+            if (industryFilter !== 'all' && !company.industry?.startsWith(industryFilter)) return false;
+            if (areaFilter !== 'all' && company.area !== areaFilter) return false;
+            if (sourceFilter !== 'all' && company.source !== sourceFilter) return false;
+            if (!matchesSalaryFilter(company.salary_text, salaryFilter)) return false;
+            if (!matchesEmployeesFilter(company.employees, employeesFilter)) return false;
+
+            return true;
+        });
+
+        // Apply sorting
+        if (sortColumn) {
+            result = [...result].sort((a, b) => {
+                let aVal: string | number = '';
+                let bVal: string | number = '';
+
+                switch (sortColumn) {
+                    case 'industry':
+                        aVal = a.industry || '';
+                        bVal = b.industry || '';
+                        break;
+                    case 'area':
+                        aVal = a.area || '';
+                        bVal = b.area || '';
+                        break;
+                    case 'salary':
+                        aVal = parseSalary(a.salary_text);
+                        bVal = parseSalary(b.salary_text);
+                        break;
+                    case 'employees':
+                        aVal = parseEmployees(a.employees);
+                        bVal = parseEmployees(b.employees);
+                        break;
+                    case 'source':
+                        aVal = a.source || '';
+                        bVal = b.source || '';
+                        break;
+                }
+
+                if (typeof aVal === 'number' && typeof bVal === 'number') {
+                    return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+                }
+                const comparison = String(aVal).localeCompare(String(bVal), 'ja');
+                return sortDirection === 'asc' ? comparison : -comparison;
+            });
         }
 
-        return true;
-    });
+        return result;
+    }, [companies, selectedRegions, selectedJobTypes, industryFilter, areaFilter, salaryFilter, employeesFilter, sourceFilter, sortColumn, sortDirection]);
+
+    // Handle sort column click
+    const handleSort = (column: SortColumn) => {
+        if (sortColumn === column) {
+            if (sortDirection === 'asc') {
+                setSortDirection('desc');
+            } else {
+                setSortColumn(null);
+                setSortDirection('asc');
+            }
+        } else {
+            setSortColumn(column);
+            setSortDirection('asc');
+        }
+    };
+
+    // Get sort icon for column
+    const getSortIcon = (column: SortColumn) => {
+        if (sortColumn !== column) {
+            return <ArrowUpDown className="h-3 w-3 ml-1 opacity-50" />;
+        }
+        return sortDirection === 'asc'
+            ? <ArrowUp className="h-3 w-3 ml-1 text-blue-600" />
+            : <ArrowDown className="h-3 w-3 ml-1 text-blue-600" />;
+    };
 
     const toggleRowSelection = (id: number) => {
         setSelectedRows((prev) => {
@@ -454,6 +608,50 @@ export function ListPage() {
                             </Button>
                         </div>
                     )}
+
+                    {/* Active Column Filters Display */}
+                    {(industryFilter !== 'all' || areaFilter !== 'all' || salaryFilter !== 'all' || employeesFilter !== 'all' || sourceFilter !== 'all' || sortColumn) && (
+                        <div className="mt-4 pt-3 border-t flex items-center gap-2 flex-wrap">
+                            <span className="text-sm text-muted-foreground">適用中:</span>
+                            {industryFilter !== 'all' && (
+                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">業種: {industryFilter}</span>
+                            )}
+                            {areaFilter !== 'all' && (
+                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">エリア: {areaFilter}</span>
+                            )}
+                            {salaryFilter !== 'all' && (
+                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">給与: {salaryFilter}</span>
+                            )}
+                            {employeesFilter !== 'all' && (
+                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">規模: {employeesFilter}</span>
+                            )}
+                            {sourceFilter !== 'all' && (
+                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">ソース: {sourceFilter}</span>
+                            )}
+                            {sortColumn && (
+                                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
+                                    並び替え: {sortColumn === 'industry' ? '業種' : sortColumn === 'area' ? 'エリア' : sortColumn === 'salary' ? '給与' : sortColumn === 'employees' ? '規模' : 'ソース'}
+                                    ({sortDirection === 'asc' ? '昇順' : '降順'})
+                                </span>
+                            )}
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 text-xs"
+                                onClick={() => {
+                                    setIndustryFilter('all');
+                                    setAreaFilter('all');
+                                    setSalaryFilter('all');
+                                    setEmployeesFilter('all');
+                                    setSourceFilter('all');
+                                    setSortColumn(null);
+                                    setSortDirection('asc');
+                                }}
+                            >
+                                すべてクリア
+                            </Button>
+                        </div>
+                    )}
                 </Card>
             )}
 
@@ -473,11 +671,113 @@ export function ListPage() {
                                 <th className="p-2 text-left font-medium w-[40px]">詳細</th>
                                 <th className="p-2 text-left font-medium w-[100px]">電話番号</th>
                                 <th className="p-2 text-left font-medium w-[80px]">会社HP</th>
-                                <th className="p-2 text-left font-medium w-[100px]">業種</th>
-                                <th className="p-2 text-left font-medium w-[60px]">エリア</th>
-                                <th className="p-2 text-left font-medium w-[90px]">給与</th>
-                                <th className="p-2 text-left font-medium w-[70px]">規模</th>
-                                <th className="p-2 text-left font-medium w-[50px]">ソース</th>
+                                <th className="p-1 text-left font-medium w-[120px]">
+                                    <div className="space-y-1">
+                                        <button
+                                            className="flex items-center hover:text-blue-600"
+                                            onClick={() => handleSort('industry')}
+                                        >
+                                            業種{getSortIcon('industry')}
+                                        </button>
+                                        <Select value={industryFilter} onValueChange={setIndustryFilter}>
+                                            <SelectTrigger className="h-6 text-[10px] w-full">
+                                                <SelectValue placeholder="全て" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">全て</SelectItem>
+                                                {filterOptions.industries.slice(0, 20).map(opt => (
+                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </th>
+                                <th className="p-1 text-left font-medium w-[80px]">
+                                    <div className="space-y-1">
+                                        <button
+                                            className="flex items-center hover:text-blue-600"
+                                            onClick={() => handleSort('area')}
+                                        >
+                                            エリア{getSortIcon('area')}
+                                        </button>
+                                        <Select value={areaFilter} onValueChange={setAreaFilter}>
+                                            <SelectTrigger className="h-6 text-[10px] w-full">
+                                                <SelectValue placeholder="全て" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">全て</SelectItem>
+                                                {filterOptions.areas.map(opt => (
+                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </th>
+                                <th className="p-1 text-left font-medium w-[100px]">
+                                    <div className="space-y-1">
+                                        <button
+                                            className="flex items-center hover:text-blue-600"
+                                            onClick={() => handleSort('salary')}
+                                        >
+                                            給与{getSortIcon('salary')}
+                                        </button>
+                                        <Select value={salaryFilter} onValueChange={setSalaryFilter}>
+                                            <SelectTrigger className="h-6 text-[10px] w-full">
+                                                <SelectValue placeholder="全て" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">全て</SelectItem>
+                                                {filterOptions.salaryRanges.map(opt => (
+                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </th>
+                                <th className="p-1 text-left font-medium w-[90px]">
+                                    <div className="space-y-1">
+                                        <button
+                                            className="flex items-center hover:text-blue-600"
+                                            onClick={() => handleSort('employees')}
+                                        >
+                                            規模{getSortIcon('employees')}
+                                        </button>
+                                        <Select value={employeesFilter} onValueChange={setEmployeesFilter}>
+                                            <SelectTrigger className="h-6 text-[10px] w-full">
+                                                <SelectValue placeholder="全て" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">全て</SelectItem>
+                                                {filterOptions.employeeRanges.map(opt => (
+                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </th>
+                                <th className="p-1 text-left font-medium w-[70px]">
+                                    <div className="space-y-1">
+                                        <button
+                                            className="flex items-center hover:text-blue-600"
+                                            onClick={() => handleSort('source')}
+                                        >
+                                            ソース{getSortIcon('source')}
+                                        </button>
+                                        <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                                            <SelectTrigger className="h-6 text-[10px] w-full">
+                                                <SelectValue placeholder="全て" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">全て</SelectItem>
+                                                {filterOptions.sources.map(opt => (
+                                                    <SelectItem key={opt} value={opt}>
+                                                        {opt === 'mynavi' ? 'マイナビ' : opt === 'rikunabi' ? 'リクナビ' : opt}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </th>
                                 <th className="p-2 text-left font-medium w-[70px]">ステータス</th>
                             </tr>
                         </thead>
