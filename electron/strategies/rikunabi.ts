@@ -7,34 +7,103 @@ function randomDelay(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// リクナビNEXT都道府県コードマッピング
+// リクナビNEXT都道府県マッピング（英語名）
+// URL形式: https://next.rikunabi.com/job_search/area-{英語名}/
 const prefectureCodes: Record<string, string> = {
-    '北海道': '01',
-    '青森県': '02', '岩手県': '03', '宮城県': '04', '秋田県': '05', '山形県': '06', '福島県': '07',
-    '茨城県': '08', '栃木県': '09', '群馬県': '10', '埼玉県': '11', '千葉県': '12', '東京都': '13', '神奈川県': '14',
-    '新潟県': '15', '山梨県': '19', '長野県': '20',
-    '富山県': '16', '石川県': '17', '福井県': '18',
-    '岐阜県': '21', '静岡県': '22', '愛知県': '23', '三重県': '24',
-    '滋賀県': '25', '京都府': '26', '大阪府': '27', '兵庫県': '28', '奈良県': '29', '和歌山県': '30',
-    '鳥取県': '31', '島根県': '32', '岡山県': '33', '広島県': '34', '山口県': '35',
-    '徳島県': '36', '香川県': '37', '愛媛県': '38', '高知県': '39',
-    '福岡県': '40', '佐賀県': '41', '長崎県': '42', '熊本県': '43', '大分県': '44', '宮崎県': '45', '鹿児島県': '46', '沖縄県': '47',
+    '北海道': 'hokkaido',
+    '青森県': 'aomori',
+    '岩手県': 'iwate',
+    '宮城県': 'miyagi',
+    '秋田県': 'akita',
+    '山形県': 'yamagata',
+    '福島県': 'fukushima',
+    '茨城県': 'ibaraki',
+    '栃木県': 'tochigi',
+    '群馬県': 'gunma',
+    '埼玉県': 'saitama',
+    '千葉県': 'chiba',
+    '東京都': 'tokyo',
+    '神奈川県': 'kanagawa',
+    '新潟県': 'niigata',
+    '富山県': 'toyama',
+    '石川県': 'ishikawa',
+    '福井県': 'fukui',
+    '山梨県': 'yamanashi',
+    '長野県': 'nagano',
+    '岐阜県': 'gifu',
+    '静岡県': 'shizuoka',
+    '愛知県': 'aichi',
+    '三重県': 'mie',
+    '滋賀県': 'shiga',
+    '京都府': 'kyoto',
+    '大阪府': 'osaka',
+    '兵庫県': 'hyogo',
+    '奈良県': 'nara',
+    '和歌山県': 'wakayama',
+    '鳥取県': 'tottori',
+    '島根県': 'shimane',
+    '岡山県': 'okayama',
+    '広島県': 'hiroshima',
+    '山口県': 'yamaguchi',
+    '徳島県': 'tokushima',
+    '香川県': 'kagawa',
+    '愛媛県': 'ehime',
+    '高知県': 'kochi',
+    '福岡県': 'fukuoka',
+    '佐賀県': 'saga',
+    '長崎県': 'nagasaki',
+    '熊本県': 'kumamoto',
+    '大分県': 'oita',
+    '宮崎県': 'miyazaki',
+    '鹿児島県': 'kagoshima',
+    '沖縄県': 'okinawa',
 };
 
-// リクナビNEXT職種カテゴリマッピング
+// リクナビNEXT職種カテゴリマッピング（英語名）
+// URL形式: /oc-{英語名}/
 const jobTypeCodes: Record<string, string> = {
-    '営業・販売': '100',
-    '経営・事業企画・人事・事務': '200',
-    'IT・Web・ゲームエンジニア': '300',
-    'モノづくりエンジニア': '400',
-    'コンサルタント・士業・金融': '500',
-    'サービス・販売・接客': '600',
-    '不動産・建設': '700',
-    '物流・運輸・運転': '800',
-    '医療・福祉・介護': '900',
-    'クリエイティブ・マスコミ': '1000',
-    '教育・保育': '1100',
-    'その他': '9900',
+    // サイト固有の名称
+    '営業': 'selling',
+    '企画/マーケティング': 'promotion',
+    'コーポレートスタッフ': 'corporatestaff',
+    'SCM/生産管理/購買/物流': 'scm',
+    '事務/受付/秘書/翻訳': 'administration',
+    '小売販売/流通': 'retail',
+    'サービス/接客': 'hospitality',
+    '飲食': 'foodservice',
+    'コンサル/士業/リサーチャー': 'consulting',
+    'IT・Web・ゲームエンジニア': 'it',
+    'クリエイティブ/デザイン職': 'design',
+    '建築/土木/プラント専門職': 'building',
+    '不動産専門職': 'realestate',
+    '機械/電気/電子製品専門職': 'electronic',
+    '化学/素材専門職': 'chemicals',
+    '化粧品/日用品/アパレル専門職': 'consumergoods',
+    '医薬品専門職': 'pharmaceuticals',
+    '医療機器/理化学機器専門職': 'medicaldevices',
+    '医療/福祉専門職': 'medical',
+    '金融専門職': 'financial',
+    '食品/香料/飼料専門職': 'culinary',
+    '出版/メディア/エンタメ専門職': 'broadcasting',
+    'インフラ専門職': 'infrastructure',
+    '交通/運輸/物流専門職': 'transportation',
+    '人材サービス専門職': 'recruitment',
+    '教育/保育専門職': 'instruction',
+    'エグゼクティブ': 'executive',
+    '学術研究': 'analysis',
+    '公務員/団体職員/農林水産': 'publicsector',
+    // SearchPage統一カテゴリからのエイリアス
+    '営業・販売': 'selling',
+    '経営・事業企画・人事・事務': 'corporatestaff',
+    'モノづくりエンジニア': 'electronic',
+    'コンサルタント・士業・金融': 'consulting',
+    'サービス・販売・接客': 'hospitality',
+    '不動産・建設': 'building',
+    '物流・運輸・運転': 'transportation',
+    '医療・福祉・介護': 'medical',
+    'クリエイティブ・マスコミ': 'design',
+    '教育・保育': 'instruction',
+    'その他': 'publicsector',
 };
 
 export class RikunabiStrategy implements ScrapingStrategy {
@@ -53,31 +122,12 @@ export class RikunabiStrategy implements ScrapingStrategy {
         };
 
         // 検索結果ページURL構築
-        // リクナビNEXTは ?nw=true パラメータを使用
-        let searchUrl = 'https://next.rikunabi.com/job_search/?nw=true';
+        // URL形式: https://next.rikunabi.com/job_search/area-{英語名}/oc-{職種英語名}/
+        const searchUrl = this.buildSearchUrl(params);
+        let currentSearchUrl = searchUrl;
 
-        if (keywords) {
-            // キーワード検索の場合
-            searchUrl += `&kw=${encodeURIComponent(keywords)}`;
-        }
-
-        // 都道府県指定（複数対応）
-        if (prefectures && prefectures.length > 0) {
-            const codes = prefectures
-                .map(pref => prefectureCodes[pref])
-                .filter(code => code);
-            if (codes.length > 0) {
-                searchUrl += `&ar=${codes.join(',')}`;
-            }
-        }
-
-        // 職種指定（複数対応）
-        if (jobTypes && jobTypes.length > 0) {
-            const codes = jobTypes
-                .map(jt => jobTypeCodes[jt])
-                .filter(code => code);
-            if (codes.length > 0) {
-                searchUrl += `&oc=${codes.join(',')}`;
+        // ダミーコード（既存の条件ロジックを維持するため）
+        if (false) {
             }
         }
 
@@ -505,30 +555,38 @@ export class RikunabiStrategy implements ScrapingStrategy {
     }
 
     // 検索URLを構築するヘルパーメソッド
+    // URL形式: https://next.rikunabi.com/job_search/area-{英語名}/oc-{職種英語名}/
     private buildSearchUrl(params: ScrapingParams): string {
         const { keywords, prefectures, jobTypes } = params;
-        let searchUrl = 'https://next.rikunabi.com/job_search/?nw=true';
 
-        if (keywords) {
-            searchUrl += `&kw=${encodeURIComponent(keywords)}`;
-        }
+        // パスベースのURL構築
+        let pathParts: string[] = [];
 
+        // 都道府県（最初の1つを使用）
         if (prefectures && prefectures.length > 0) {
-            const codes = prefectures
-                .map(pref => prefectureCodes[pref])
-                .filter(code => code);
-            if (codes.length > 0) {
-                searchUrl += `&ar=${codes.join(',')}`;
+            const areaCode = prefectureCodes[prefectures[0]];
+            if (areaCode) {
+                pathParts.push(`area-${areaCode}`);
             }
         }
 
+        // 職種（最初の1つを使用）
         if (jobTypes && jobTypes.length > 0) {
-            const codes = jobTypes
-                .map(jt => jobTypeCodes[jt])
-                .filter(code => code);
-            if (codes.length > 0) {
-                searchUrl += `&oc=${codes.join(',')}`;
+            const jobCode = jobTypeCodes[jobTypes[0]];
+            if (jobCode) {
+                pathParts.push(`oc-${jobCode}`);
             }
+        }
+
+        // URL構築
+        let searchUrl = 'https://next.rikunabi.com/job_search/';
+        if (pathParts.length > 0) {
+            searchUrl += pathParts.join('/') + '/';
+        }
+
+        // キーワードはクエリパラメータで追加
+        if (keywords) {
+            searchUrl += `?kw=${encodeURIComponent(keywords)}`;
         }
 
         return searchUrl;

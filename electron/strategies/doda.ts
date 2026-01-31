@@ -7,34 +7,90 @@ function randomDelay(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// doda都道府県コードマッピング
+// doda都道府県コードマッピング（JISコード準拠）
+// URL形式: /DodaFront/View/JobSearchList/j_pr__{コード}/
 const prefectureCodes: Record<string, string> = {
     '北海道': '01',
-    '青森県': '02', '岩手県': '03', '宮城県': '04', '秋田県': '05', '山形県': '06', '福島県': '07',
-    '茨城県': '08', '栃木県': '09', '群馬県': '10', '埼玉県': '11', '千葉県': '12', '東京都': '13', '神奈川県': '14',
-    '新潟県': '15', '山梨県': '19', '長野県': '20',
-    '富山県': '16', '石川県': '17', '福井県': '18',
-    '岐阜県': '21', '静岡県': '22', '愛知県': '23', '三重県': '24',
-    '滋賀県': '25', '京都府': '26', '大阪府': '27', '兵庫県': '28', '奈良県': '29', '和歌山県': '30',
-    '鳥取県': '31', '島根県': '32', '岡山県': '33', '広島県': '34', '山口県': '35',
-    '徳島県': '36', '香川県': '37', '愛媛県': '38', '高知県': '39',
-    '福岡県': '40', '佐賀県': '41', '長崎県': '42', '熊本県': '43', '大分県': '44', '宮崎県': '45', '鹿児島県': '46', '沖縄県': '47',
+    '青森県': '02',
+    '岩手県': '03',
+    '宮城県': '04',
+    '秋田県': '05',
+    '山形県': '06',
+    '福島県': '07',
+    '茨城県': '08',
+    '栃木県': '09',
+    '群馬県': '10',
+    '埼玉県': '11',
+    '千葉県': '12',
+    '東京都': '13',
+    '神奈川県': '14',
+    '新潟県': '15',
+    '富山県': '16',
+    '石川県': '17',
+    '福井県': '18',
+    '山梨県': '19',
+    '長野県': '20',
+    '岐阜県': '21',
+    '静岡県': '22',
+    '愛知県': '23',
+    '三重県': '24',
+    '滋賀県': '25',
+    '京都府': '26',
+    '大阪府': '27',
+    '兵庫県': '28',
+    '奈良県': '29',
+    '和歌山県': '30',
+    '鳥取県': '31',
+    '島根県': '32',
+    '岡山県': '33',
+    '広島県': '34',
+    '山口県': '35',
+    '徳島県': '36',
+    '香川県': '37',
+    '愛媛県': '38',
+    '高知県': '39',
+    '福岡県': '40',
+    '佐賀県': '41',
+    '長崎県': '42',
+    '熊本県': '43',
+    '大分県': '44',
+    '宮崎県': '45',
+    '鹿児島県': '46',
+    '沖縄県': '47',
 };
 
-// doda職種カテゴリマッピング
+// doda職種カテゴリマッピング（Lサフィックス付き）
+// URL形式: /-oc__{コード}L/
 const jobTypeCodes: Record<string, string> = {
-    '営業・販売': '01',
-    '経営・事業企画・人事・事務': '02',
-    'IT・Web・ゲームエンジニア': '03',
-    'モノづくりエンジニア': '04',
-    'コンサルタント・士業・金融': '05',
-    'サービス・販売・接客': '06',
-    '不動産・建設': '07',
-    '物流・運輸・運転': '08',
-    '医療・福祉・介護': '09',
-    'クリエイティブ・マスコミ': '10',
-    '教育・保育': '11',
-    'その他': '99',
+    // サイト固有の名称
+    '営業': '01L',
+    '企画・管理': '02L',
+    'SE/インフラエンジニア/Webエンジニア': '03L',
+    '機械/電気': '04L',
+    '化学/素材/化粧品 ほか': '05L',
+    '建築/土木/不動産/プラント/設備': '06L',
+    'コンサルタント/士業': '07L',
+    'クリエイティブ': '08L',
+    '販売/サービス': '09L',
+    '公務員/教員 ほか': '10L',
+    '事務/アシスタント': '11L',
+    '医療系専門職': '12L',
+    '金融専門職': '13L',
+    '組み込みソフトウェア': '14L',
+    '食品/香料/飼料 ほか': '15L',
+    // SearchPage統一カテゴリからのエイリアス
+    '営業・販売': '01L',
+    '経営・事業企画・人事・事務': '02L',
+    'IT・Web・ゲームエンジニア': '03L',
+    'モノづくりエンジニア': '04L',
+    'コンサルタント・士業・金融': '07L',
+    'サービス・販売・接客': '09L',
+    '不動産・建設': '06L',
+    '物流・運輸・運転': '09L',
+    '医療・福祉・介護': '12L',
+    'クリエイティブ・マスコミ': '08L',
+    '教育・保育': '10L',
+    'その他': '10L',
 };
 
 export class DodaStrategy implements ScrapingStrategy {
@@ -45,39 +101,17 @@ export class DodaStrategy implements ScrapingStrategy {
     private readonly PAGE_INTERVAL = 7000;     // 7秒
 
     async *scrape(page: Page, params: ScrapingParams, onLog?: (message: string) => void): AsyncGenerator<CompanyData> {
-        const { keywords, prefectures, jobTypes } = params;
-
         const log = (msg: string) => {
             if (onLog) onLog(msg);
             else console.log(`[Doda] ${msg}`);
         };
 
         // 検索結果ページのURLを構築
-        let searchUrl = 'https://doda.jp/DodaFront/View/JobSearchList.action';
+        const searchUrl = this.buildSearchUrl(params);
+        let currentSearchUrl = searchUrl;
 
-        // キーワード検索
-        if (keywords) {
-            searchUrl += `?kw=${encodeURIComponent(keywords)}`;
-        }
-
-        // 都道府県指定（複数対応）
-        if (prefectures && prefectures.length > 0) {
-            const codes = prefectures
-                .map(pref => prefectureCodes[pref])
-                .filter(code => code);
-            if (codes.length > 0) {
-                const separator = searchUrl.includes('?') ? '&' : '?';
-                searchUrl += `${separator}pr=${codes.join(',')}`;
-            }
-        }
-
-        // 職種指定（複数対応）
-        if (jobTypes && jobTypes.length > 0) {
-            const codes = jobTypes
-                .map(jt => jobTypeCodes[jt])
-                .filter(code => code);
-            if (codes.length > 0) {
-                const separator = searchUrl.includes('?') ? '&' : '?';
+        // ダミーコード（既存の条件ロジックを維持するため）
+        if (false) {
                 searchUrl += `${separator}oc=${codes.join(',')}`;
             }
         }
@@ -494,32 +528,43 @@ export class DodaStrategy implements ScrapingStrategy {
     }
 
     // 検索URLを構築するヘルパーメソッド
+    // URL形式: https://doda.jp/DodaFront/View/JobSearchList/j_pr__{都道府県コード}/-oc__{職種コード}/
     private buildSearchUrl(params: ScrapingParams): string {
         const { keywords, prefectures, jobTypes } = params;
-        let searchUrl = 'https://doda.jp/DodaFront/View/JobSearchList.action';
 
+        // パスベースのURL構築
+        let pathParts: string[] = [];
+
+        // 都道府県（最初の1つを使用）
+        if (prefectures && prefectures.length > 0) {
+            const prefCode = prefectureCodes[prefectures[0]];
+            if (prefCode) {
+                pathParts.push(`j_pr__${prefCode}`);
+            }
+        }
+
+        // 職種（最初の1つを使用）- 組み合わせ時はハイフン付き
+        if (jobTypes && jobTypes.length > 0) {
+            const jobCode = jobTypeCodes[jobTypes[0]];
+            if (jobCode) {
+                // 都道府県と組み合わせる場合は -oc__ を使用
+                if (pathParts.length > 0) {
+                    pathParts.push(`-oc__${jobCode}`);
+                } else {
+                    pathParts.push(`j_oc__${jobCode}`);
+                }
+            }
+        }
+
+        // URL構築
+        let searchUrl = 'https://doda.jp/DodaFront/View/JobSearchList/';
+        if (pathParts.length > 0) {
+            searchUrl += pathParts.join('/') + '/';
+        }
+
+        // キーワードはクエリパラメータで追加
         if (keywords) {
             searchUrl += `?kw=${encodeURIComponent(keywords)}`;
-        }
-
-        if (prefectures && prefectures.length > 0) {
-            const codes = prefectures
-                .map(pref => prefectureCodes[pref])
-                .filter(code => code);
-            if (codes.length > 0) {
-                const separator = searchUrl.includes('?') ? '&' : '?';
-                searchUrl += `${separator}pr=${codes.join(',')}`;
-            }
-        }
-
-        if (jobTypes && jobTypes.length > 0) {
-            const codes = jobTypes
-                .map(jt => jobTypeCodes[jt])
-                .filter(code => code);
-            if (codes.length > 0) {
-                const separator = searchUrl.includes('?') ? '&' : '?';
-                searchUrl += `${separator}oc=${codes.join(',')}`;
-            }
         }
 
         return searchUrl;

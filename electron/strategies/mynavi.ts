@@ -8,34 +8,91 @@ function randomDelay(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// マイナビ都道府県コードマッピング
-const prefectureCodes: Record<string, string> = {
-    '北海道': 'hokkaido',
-    '青森県': 'aomori', '岩手県': 'iwate', '宮城県': 'miyagi', '秋田県': 'akita', '山形県': 'yamagata', '福島県': 'fukushima',
-    '茨城県': 'ibaraki', '栃木県': 'tochigi', '群馬県': 'gunma', '埼玉県': 'saitama', '千葉県': 'chiba', '東京都': 'tokyo', '神奈川県': 'kanagawa',
-    '新潟県': 'niigata', '山梨県': 'yamanashi', '長野県': 'nagano',
-    '富山県': 'toyama', '石川県': 'ishikawa', '福井県': 'fukui',
-    '岐阜県': 'gifu', '静岡県': 'shizuoka', '愛知県': 'aichi', '三重県': 'mie',
-    '滋賀県': 'shiga', '京都府': 'kyoto', '大阪府': 'osaka', '兵庫県': 'hyogo', '奈良県': 'nara', '和歌山県': 'wakayama',
-    '鳥取県': 'tottori', '島根県': 'shimane', '岡山県': 'okayama', '広島県': 'hiroshima', '山口県': 'yamaguchi',
-    '徳島県': 'tokushima', '香川県': 'kagawa', '愛媛県': 'ehime', '高知県': 'kochi',
-    '福岡県': 'fukuoka', '佐賀県': 'saga', '長崎県': 'nagasaki', '熊本県': 'kumamoto', '大分県': 'oita', '宮崎県': 'miyazaki', '鹿児島県': 'kagoshima', '沖縄県': 'okinawa',
+// マイナビ都道府県マッピング（エリア + pコード）
+// URL形式: https://tenshoku.mynavi.jp/{エリア}/list/p{コード}/
+const prefectureMapping: Record<string, { area: string; code: string }> = {
+    '北海道': { area: 'hokkaido', code: '' },  // 北海道は単独エリアのためコード不要
+    '青森県': { area: 'tohoku', code: 'p02' },
+    '岩手県': { area: 'tohoku', code: 'p03' },
+    '宮城県': { area: 'tohoku', code: 'p04' },
+    '秋田県': { area: 'tohoku', code: 'p05' },
+    '山形県': { area: 'tohoku', code: 'p06' },
+    '福島県': { area: 'tohoku', code: 'p07' },
+    '茨城県': { area: 'kitakanto', code: 'p08' },
+    '栃木県': { area: 'kitakanto', code: 'p09' },
+    '群馬県': { area: 'kitakanto', code: 'p10' },
+    '埼玉県': { area: 'shutoken', code: 'p11' },
+    '千葉県': { area: 'shutoken', code: 'p12' },
+    '東京都': { area: 'shutoken', code: 'p13' },
+    '神奈川県': { area: 'shutoken', code: 'p14' },
+    '新潟県': { area: 'koshinetsu', code: 'p15' },
+    '富山県': { area: 'hokuriku', code: 'p16' },
+    '石川県': { area: 'hokuriku', code: 'p17' },
+    '福井県': { area: 'hokuriku', code: 'p18' },
+    '山梨県': { area: 'koshinetsu', code: 'p19' },
+    '長野県': { area: 'koshinetsu', code: 'p20' },
+    '岐阜県': { area: 'tokai', code: 'p21' },
+    '静岡県': { area: 'tokai', code: 'p22' },
+    '愛知県': { area: 'tokai', code: 'p23' },
+    '三重県': { area: 'tokai', code: 'p24' },
+    '滋賀県': { area: 'kansai', code: 'p25' },
+    '京都府': { area: 'kansai', code: 'p26' },
+    '大阪府': { area: 'kansai', code: 'p27' },
+    '兵庫県': { area: 'kansai', code: 'p28' },
+    '奈良県': { area: 'kansai', code: 'p29' },
+    '和歌山県': { area: 'kansai', code: 'p30' },
+    '鳥取県': { area: 'chugoku', code: 'p31' },
+    '島根県': { area: 'chugoku', code: 'p32' },
+    '岡山県': { area: 'chugoku', code: 'p33' },
+    '広島県': { area: 'chugoku', code: 'p34' },
+    '山口県': { area: 'chugoku', code: 'p35' },
+    '徳島県': { area: 'shikoku', code: 'p36' },
+    '香川県': { area: 'shikoku', code: 'p37' },
+    '愛媛県': { area: 'shikoku', code: 'p38' },
+    '高知県': { area: 'shikoku', code: 'p39' },
+    '福岡県': { area: 'kyushu', code: 'p40' },
+    '佐賀県': { area: 'kyushu', code: 'p41' },
+    '長崎県': { area: 'kyushu', code: 'p42' },
+    '熊本県': { area: 'kyushu', code: 'p43' },
+    '大分県': { area: 'kyushu', code: 'p44' },
+    '宮崎県': { area: 'kyushu', code: 'p45' },
+    '鹿児島県': { area: 'kyushu', code: 'p46' },
+    '沖縄県': { area: 'kyushu', code: 'p47' },
 };
 
-// マイナビ職種カテゴリマッピング
+// マイナビ職種コードマッピング
+// URL形式: /o{コード}/
 const jobTypeCodes: Record<string, string> = {
-    '営業・販売': 'ss010',
-    '経営・事業企画・人事・事務': 'ss020',
-    'IT・Web・ゲームエンジニア': 'ss030',
-    'モノづくりエンジニア': 'ss040',
-    'コンサルタント・士業・金融': 'ss050',
-    'サービス・販売・接客': 'ss060',
-    '不動産・建設': 'ss070',
-    '物流・運輸・運転': 'ss080',
-    '医療・福祉・介護': 'ss090',
-    'クリエイティブ・マスコミ': 'ss100',
-    '教育・保育': 'ss110',
-    'その他': 'ss990',
+    // サイト固有の名称
+    '営業': 'o11',
+    '販売・フード・アミューズメント': 'o12',
+    '医療・福祉': 'o13',
+    '企画・経営': 'o14',
+    '建築・土木': 'o15',
+    'ITエンジニア': 'o16',
+    '電気・電子・機械・半導体': 'o17',
+    '医薬・食品・化学・素材': 'o18',
+    'コンサルタント・金融・不動産専門職': 'o19',
+    'クリエイティブ': 'o1A',
+    '技能工・設備・配送・農林水産 他': 'o1B',
+    '公共サービス': 'o1C',
+    '管理・事務': 'o1D',
+    '美容・ブライダル・ホテル・交通': 'o1E',
+    '保育・教育・通訳': 'o1F',
+    'WEB・インターネット・ゲーム': 'o1G',
+    // SearchPage統一カテゴリからのエイリアス
+    '営業・販売': 'o11',
+    '経営・事業企画・人事・事務': 'o14',
+    'IT・Web・ゲームエンジニア': 'o16',
+    'モノづくりエンジニア': 'o17',
+    'コンサルタント・士業・金融': 'o19',
+    'サービス・販売・接客': 'o12',
+    '不動産・建設': 'o15',
+    '物流・運輸・運転': 'o1B',
+    '医療・福祉・介護': 'o13',
+    'クリエイティブ・マスコミ': 'o1A',
+    '教育・保育': 'o1F',
+    'その他': 'o1C',
 };
 
 // 求人カードのセレクター候補（優先順位順）
@@ -86,46 +143,13 @@ export class MynaviStrategy implements ScrapingStrategy {
     private readonly PAGE_INTERVAL = 5000;     // 5秒
 
     async *scrape(page: Page, params: ScrapingParams, onLog?: (message: string) => void): AsyncGenerator<CompanyData> {
-        const { keywords, location, prefectures, jobTypes } = params;
-
         const log = (msg: string) => {
             if (onLog) onLog(msg);
             else console.log(`[Mynavi] ${msg}`);
         };
 
         // 検索結果ページのURLを構築
-        let searchUrl = 'https://tenshoku.mynavi.jp/list/';
-
-        // キーワード検索
-        if (keywords) {
-            searchUrl += `?searchKeyword=${encodeURIComponent(keywords)}`;
-        }
-
-        // 都道府県指定（複数対応）
-        if (prefectures && prefectures.length > 0) {
-            const codes = prefectures
-                .map(pref => prefectureCodes[pref])
-                .filter(code => code);
-            if (codes.length > 0) {
-                const separator = searchUrl.includes('?') ? '&' : '?';
-                searchUrl += `${separator}ar=${codes.join(',')}`;
-            }
-        } else if (location) {
-            // 後方互換: 単一location指定
-            const separator = searchUrl.includes('?') ? '&' : '?';
-            searchUrl += `${separator}locationCodes=${encodeURIComponent(location)}`;
-        }
-
-        // 職種指定（複数対応）
-        if (jobTypes && jobTypes.length > 0) {
-            const codes = jobTypes
-                .map(jt => jobTypeCodes[jt])
-                .filter(code => code);
-            if (codes.length > 0) {
-                const separator = searchUrl.includes('?') ? '&' : '?';
-                searchUrl += `${separator}ss=${codes.join(',')}`;
-            }
-        }
+        const searchUrl = this.buildSearchUrl(params);
 
         log(`Navigating to: ${searchUrl}`);
 
@@ -590,35 +614,53 @@ export class MynaviStrategy implements ScrapingStrategy {
     }
 
     // 検索URLを構築するヘルパーメソッド
+    // URL形式: https://tenshoku.mynavi.jp/{エリア}/list/p{都道府県コード}/o{職種コード}/
     private buildSearchUrl(params: ScrapingParams): string {
-        const { keywords, location, prefectures, jobTypes } = params;
-        let searchUrl = 'https://tenshoku.mynavi.jp/list/';
+        const { keywords, prefectures, jobTypes } = params;
 
+        // ベースURL構築
+        let basePath = '';
+        let prefCode = '';
+
+        // 都道府県からエリアとコードを取得（最初の1つを使用）
+        if (prefectures && prefectures.length > 0) {
+            const pref = prefectures[0];
+            const mapping = prefectureMapping[pref];
+            if (mapping) {
+                basePath = mapping.area;
+                prefCode = mapping.code;
+            }
+        }
+
+        // 職種コードを取得（最初の1つを使用）
+        let jobCode = '';
+        if (jobTypes && jobTypes.length > 0) {
+            const jt = jobTypes[0];
+            jobCode = jobTypeCodes[jt] || '';
+        }
+
+        // URL構築
+        let searchUrl = 'https://tenshoku.mynavi.jp/';
+
+        if (basePath) {
+            searchUrl += `${basePath}/list/`;
+            if (prefCode) {
+                searchUrl += `${prefCode}/`;
+            }
+            if (jobCode) {
+                searchUrl += `${jobCode}/`;
+            }
+        } else {
+            // 条件なしの場合はベースリストURL
+            searchUrl += 'list/';
+            if (jobCode) {
+                searchUrl += `${jobCode}/`;
+            }
+        }
+
+        // キーワード検索はクエリパラメータで追加
         if (keywords) {
             searchUrl += `?searchKeyword=${encodeURIComponent(keywords)}`;
-        }
-
-        if (prefectures && prefectures.length > 0) {
-            const codes = prefectures
-                .map(pref => prefectureCodes[pref])
-                .filter(code => code);
-            if (codes.length > 0) {
-                const separator = searchUrl.includes('?') ? '&' : '?';
-                searchUrl += `${separator}ar=${codes.join(',')}`;
-            }
-        } else if (location) {
-            const separator = searchUrl.includes('?') ? '&' : '?';
-            searchUrl += `${separator}locationCodes=${encodeURIComponent(location)}`;
-        }
-
-        if (jobTypes && jobTypes.length > 0) {
-            const codes = jobTypes
-                .map(jt => jobTypeCodes[jt])
-                .filter(code => code);
-            if (codes.length > 0) {
-                const separator = searchUrl.includes('?') ? '&' : '?';
-                searchUrl += `${separator}ss=${codes.join(',')}`;
-            }
         }
 
         return searchUrl;
