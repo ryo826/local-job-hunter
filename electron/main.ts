@@ -3,6 +3,7 @@ import path from 'path';
 import dotenv from 'dotenv';
 import { initDB, companyRepository } from './database';
 import { ScrapingEngine } from './scraping-engine';
+import { getExportService } from './services/ExportService';
 
 // Load environment variables from .env file
 dotenv.config();
@@ -60,6 +61,15 @@ ipcMain.handle('db:updateCompany', async (_event, id, updates) => {
     try {
         companyRepository.update(id, updates);
         return { success: true };
+    } catch (error) {
+        return { success: false, error: String(error) };
+    }
+});
+
+ipcMain.handle('db:exportCsv', async (_event, options) => {
+    try {
+        const exportService = getExportService();
+        return await exportService.exportToCSV(options);
     } catch (error) {
         return { success: false, error: String(error) };
     }

@@ -22,6 +22,7 @@ export interface Company {
     employees?: string;
     revenue?: string;
     phone?: string;
+    email?: string;
     contact_form_url?: string;
     ai_summary?: string;
     ai_tags?: string;
@@ -67,6 +68,8 @@ const electronAPI = {
             ipcRenderer.invoke('db:getCompany', id),
         updateCompany: (id: number, updates: Partial<Company>): Promise<{ success: boolean }> =>
             ipcRenderer.invoke('db:updateCompany', id, updates),
+        exportCsv: (options?: { ids?: number[] }): Promise<{ success: boolean; error?: string; path?: string }> =>
+            ipcRenderer.invoke('db:exportCsv', options),
     },
     scraper: {
         start: (options: ScrapingOptions): Promise<{ success: boolean; error?: string }> =>
