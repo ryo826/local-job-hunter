@@ -413,85 +413,77 @@ export class DodaStrategy implements ScrapingStrategy {
     // 企業URLを抽出 (DescriptionList内の企業URLリンク)
     private async extractCompanyUrl(page: Page, log: (msg: string) => void): Promise<string | undefined> {
         try {
-            // デバッグ: ページ上のすべてのdt要素のテキストを取得
-            const allDts = await page.locator('dt').all();
-            const dtTexts: string[] = [];
-            for (const dt of allDts.slice(0, 20)) { // 最初の20個まで
-                const text = await dt.textContent();
-                if (text) dtTexts.push(text.trim());
-            }
-            log(`Found dt labels: ${dtTexts.join(', ')}`);
+            // ページ内のJavaScriptで直接探す（動的コンテンツ対応）
+            const result = await page.evaluate(() => {
+                const debug: string[] = [];
 
-            // 企業URLセクションのリンクを探す（複数のセレクターを試す）
-            const linkSelectors = [
-                'a.jobSearchDetail-companyOverview__link',
-                'a[class*="companyOverview__link"]',
-                'a[class*="companyUrl"]',
-                'a[class*="corporateUrl"]',
-                'dd a[href^="http"]', // dd内の外部リンク
-            ];
-
-            for (const selector of linkSelectors) {
-                const companyLink = page.locator(selector).first();
-                const count = await companyLink.count();
-                log(`Selector "${selector}" found ${count} elements`);
-                if (count > 0) {
-                    const href = await companyLink.getAttribute('href');
-                    log(`  href: ${href}`);
-                    if (href && !href.includes('doda.jp')) {
-                        log(`Found company URL via selector ${selector}: ${href}`);
-                        return href;
-                    }
+                // 方法1: jobSearchDetail-companyOverview__link クラスのリンクを探す
+                const directLink = document.querySelector('a.jobSearchDetail-companyOverview__link') as HTMLAnchorElement;
+                if (directLink && directLink.href && !directLink.href.includes('doda.jp')) {
+                    debug.push(`Found via direct class: ${directLink.href}`);
+                    return { url: directLink.href, debug };
                 }
-            }
 
-            // フォールバック: DescriptionListから企業URLを探す（複数のラベル名を試す）
-            const labels = ['企業URL', '企業HP', 'ホームページ', 'HP', '企業ホームページ', 'WEBサイト', 'Webサイト', '公式サイト', 'URL'];
-            for (const label of labels) {
-                const urlValue = await this.extractDescriptionValue(page, label);
-                if (urlValue) {
-                    log(`Label "${label}" value: ${urlValue.substring(0, 100)}`);
-                    // URLを抽出 (テキストからURLを取り出す)
-                    const urlMatch = urlValue.match(/https?:\/\/[^\s<>"]+/);
-                    if (urlMatch) {
-                        log(`Found company URL via label "${label}": ${urlMatch[0]}`);
-                        return urlMatch[0];
-                    }
-                }
-            }
+                // 方法2: dt要素から「企業URL」を探す
+                const dts = document.querySelectorAll('dt');
+                debug.push(`Found ${dts.length} dt elements`);
 
-            // dt/ddの「企業URL」行を直接探す
-            const dtElements = await page.locator('dt').all();
-            for (const dt of dtElements) {
-                const dtText = await dt.textContent();
-                if (dtText && dtText.includes('URL')) {
-                    log(`Found dt with URL: "${dtText}"`);
-                    // 隣接するddを探す
-                    const dd = dt.locator('+ dd, ~ dd').first();
-                    if (await dd.count() > 0) {
-                        const ddLink = dd.locator('a').first();
-                        if (await ddLink.count() > 0) {
-                            const href = await ddLink.getAttribute('href');
-                            if (href && !href.includes('doda.jp')) {
-                                log(`Found company URL via adjacent dd: ${href}`);
-                                return href;
+                const dtTexts: string[] = [];
+                for (const dt of dts) {
+                    const text = dt.textContent?.trim();
+                    if (text) dtTexts.push(text);
+
+                    if (text === '企業URL') {
+                        // 親のcolumnItemを探す
+                        const parent = dt.closest('[class*="columnItem"]');
+                        if (parent) {
+                            const link = parent.querySelector('a') as HTMLAnchorElement;
+                            if (link && link.href && !link.href.includes('doda.jp')) {
+                                debug.push(`Found via parent columnItem: ${link.href}`);
+                                return { url: link.href, debug };
+                            }
+                        }
+
+                        // 隣接するdd要素を探す
+                        const dd = dt.nextElementSibling;
+                        if (dd && dd.tagName === 'DD') {
+                            const link = dd.querySelector('a') as HTMLAnchorElement;
+                            if (link && link.href && !link.href.includes('doda.jp')) {
+                                debug.push(`Found via adjacent dd: ${link.href}`);
+                                return { url: link.href, debug };
                             }
                         }
                     }
                 }
-            }
+                debug.push(`dt labels: ${dtTexts.slice(0, 10).join(', ')}`);
 
-            // さらにフォールバック: ページ内のすべての外部リンクを探す
-            const allLinks = await page.locator('a[href^="http"]').all();
-            for (const link of allLinks) {
-                const href = await link.getAttribute('href');
-                if (href && !href.includes('doda.jp') && !href.includes('google') && !href.includes('facebook') && !href.includes('twitter')) {
-                    const text = await link.textContent();
-                    if (text && (text.includes('公式') || text.includes('ホームページ') || text.includes('HP') || text.includes('サイト'))) {
-                        log(`Found company URL via link text: ${href}`);
-                        return href;
+                // 方法3: DescriptionList構造から探す
+                const columnItems = document.querySelectorAll('[class*="descriptionList__columnItem"]');
+                debug.push(`Found ${columnItems.length} columnItems`);
+
+                for (const item of columnItems) {
+                    const dt = item.querySelector('dt');
+                    if (dt && dt.textContent?.trim() === '企業URL') {
+                        const link = item.querySelector('a') as HTMLAnchorElement;
+                        if (link && link.href && !link.href.includes('doda.jp')) {
+                            debug.push(`Found via columnItem structure: ${link.href}`);
+                            return { url: link.href, debug };
+                        }
                     }
                 }
+
+                debug.push('No company URL found');
+                return { url: null, debug };
+            });
+
+            // デバッグログ出力
+            for (const msg of result.debug) {
+                log(`[JS] ${msg}`);
+            }
+
+            if (result.url) {
+                log(`Found company URL: ${result.url}`);
+                return result.url;
             }
 
             log('No company URL found');
