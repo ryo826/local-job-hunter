@@ -237,36 +237,33 @@ export class DodaStrategy implements ScrapingStrategy {
                         continue;
                     }
 
-                    // 会社概要セクションまでスクロール
-                    log('Scrolling to company overview section...');
-                    await page.evaluate(() => {
-                        window.scrollTo(0, document.body.scrollHeight / 2);
-                    });
-                    await page.waitForTimeout(1000);
-
-                    // 会社概要タブをクリック (URLのtabパラメータを変更)
-                    // タブリンク: a[href*="-tab__"]
-                    log('Looking for company tab...');
-                    const companyTabLink = page.locator('a[href*="-tab__co"], a:has-text("会社概要")').first();
-                    if (await companyTabLink.count() > 0) {
+                    // 会社概要タブに直接ナビゲート（URLを変更）
+                    // -tab__pr を -tab__co に置換
+                    const companyTabUrl = fullUrl.replace(/-tab__pr\/?$/, '-tab__co/').replace(/-tab__pr\//, '-tab__co/');
+                    if (companyTabUrl !== fullUrl) {
+                        log(`Navigating to company tab: ${companyTabUrl}`);
                         try {
-                            log('Clicking company tab...');
-                            await companyTabLink.click();
+                            await page.goto(companyTabUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
                             await page.waitForTimeout(randomDelay(2000, 4000));
-                            log('Company tab clicked, current URL: ' + page.url());
-                        } catch (error) {
-                            log(`Could not click company tab: ${error}`);
+                            log('Company tab page loaded');
+                        } catch (error: any) {
+                            log(`Failed to navigate to company tab: ${error.message}`);
                         }
-                    } else {
-                        log('Company tab not found, trying to find company URL on current page...');
                     }
+
+                    // ページの最下部までスクロールしてコンテンツを読み込む
+                    log('Scrolling to load content...');
+                    await page.evaluate(() => {
+                        window.scrollTo(0, document.body.scrollHeight);
+                    });
+                    await page.waitForTimeout(2000);
 
                     // 会社概要セクションが表示されるまで待つ
                     try {
-                        await page.waitForSelector('a.jobSearchDetail-companyOverview__link', { timeout: 5000 });
-                        log('Company overview link appeared');
+                        await page.waitForSelector('dt, .DescriptionList-module_descriptionList__columnTitle__CQLXG', { timeout: 5000 });
+                        log('Description list elements appeared');
                     } catch {
-                        log('Company overview link not found within timeout');
+                        log('Description list elements not found within timeout');
                     }
 
                     // 企業情報を抽出 (DescriptionList構造)
