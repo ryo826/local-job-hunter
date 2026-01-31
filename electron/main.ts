@@ -2,6 +2,12 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
+
+// Ensure UTF-8 encoding for console output on Windows
+if (process.platform === 'win32') {
+    process.stdout.setDefaultEncoding?.('utf8');
+    process.stderr.setDefaultEncoding?.('utf8');
+}
 import { initDB, companyRepository } from './database';
 import { ScrapingEngine } from './scraping-engine';
 import { getExportService } from './services/ExportService';
