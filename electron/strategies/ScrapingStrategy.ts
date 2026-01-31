@@ -27,6 +27,8 @@ export interface CompanyData {
 export interface ScrapingParams {
     keywords?: string;
     location?: string;
+    prefectures?: string[];  // 複数の都道府県
+    jobTypes?: string[];     // 複数の職種カテゴリ
 }
 
 export interface ScrapingStrategy {

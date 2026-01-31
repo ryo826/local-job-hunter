@@ -6,6 +6,36 @@ function randomDelay(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// doda都道府県コードマッピング
+const prefectureCodes: Record<string, string> = {
+    '北海道': '01',
+    '青森県': '02', '岩手県': '03', '宮城県': '04', '秋田県': '05', '山形県': '06', '福島県': '07',
+    '茨城県': '08', '栃木県': '09', '群馬県': '10', '埼玉県': '11', '千葉県': '12', '東京都': '13', '神奈川県': '14',
+    '新潟県': '15', '山梨県': '19', '長野県': '20',
+    '富山県': '16', '石川県': '17', '福井県': '18',
+    '岐阜県': '21', '静岡県': '22', '愛知県': '23', '三重県': '24',
+    '滋賀県': '25', '京都府': '26', '大阪府': '27', '兵庫県': '28', '奈良県': '29', '和歌山県': '30',
+    '鳥取県': '31', '島根県': '32', '岡山県': '33', '広島県': '34', '山口県': '35',
+    '徳島県': '36', '香川県': '37', '愛媛県': '38', '高知県': '39',
+    '福岡県': '40', '佐賀県': '41', '長崎県': '42', '熊本県': '43', '大分県': '44', '宮崎県': '45', '鹿児島県': '46', '沖縄県': '47',
+};
+
+// doda職種カテゴリマッピング
+const jobTypeCodes: Record<string, string> = {
+    '営業・販売': '01',
+    '経営・事業企画・人事・事務': '02',
+    'IT・Web・ゲームエンジニア': '03',
+    'モノづくりエンジニア': '04',
+    'コンサルタント・士業・金融': '05',
+    'サービス・販売・接客': '06',
+    '不動産・建設': '07',
+    '物流・運輸・運転': '08',
+    '医療・福祉・介護': '09',
+    'クリエイティブ・マスコミ': '10',
+    '教育・保育': '11',
+    'その他': '99',
+};
+
 export class DodaStrategy implements ScrapingStrategy {
     readonly source = 'doda';
 
@@ -14,19 +44,41 @@ export class DodaStrategy implements ScrapingStrategy {
     private readonly PAGE_INTERVAL = 7000;     // 7秒
 
     async *scrape(page: Page, params: ScrapingParams, onLog?: (message: string) => void): AsyncGenerator<CompanyData> {
-        const { keywords, location } = params;
+        const { keywords, prefectures, jobTypes } = params;
 
         const log = (msg: string) => {
             if (onLog) onLog(msg);
             else console.log(`[Doda] ${msg}`);
         };
 
-        // 検索結果ページ
+        // 検索結果ページのURLを構築
         let searchUrl = 'https://doda.jp/DodaFront/View/JobSearchList.action';
 
         // キーワード検索
         if (keywords) {
             searchUrl += `?kw=${encodeURIComponent(keywords)}`;
+        }
+
+        // 都道府県指定（複数対応）
+        if (prefectures && prefectures.length > 0) {
+            const codes = prefectures
+                .map(pref => prefectureCodes[pref])
+                .filter(code => code);
+            if (codes.length > 0) {
+                const separator = searchUrl.includes('?') ? '&' : '?';
+                searchUrl += `${separator}pr=${codes.join(',')}`;
+            }
+        }
+
+        // 職種指定（複数対応）
+        if (jobTypes && jobTypes.length > 0) {
+            const codes = jobTypes
+                .map(jt => jobTypeCodes[jt])
+                .filter(code => code);
+            if (codes.length > 0) {
+                const separator = searchUrl.includes('?') ? '&' : '?';
+                searchUrl += `${separator}oc=${codes.join(',')}`;
+            }
         }
 
         log(`Navigating to: ${searchUrl}`);

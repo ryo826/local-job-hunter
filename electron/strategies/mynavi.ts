@@ -7,6 +7,36 @@ function randomDelay(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// マイナビ都道府県コードマッピング
+const prefectureCodes: Record<string, string> = {
+    '北海道': 'hokkaido',
+    '青森県': 'aomori', '岩手県': 'iwate', '宮城県': 'miyagi', '秋田県': 'akita', '山形県': 'yamagata', '福島県': 'fukushima',
+    '茨城県': 'ibaraki', '栃木県': 'tochigi', '群馬県': 'gunma', '埼玉県': 'saitama', '千葉県': 'chiba', '東京都': 'tokyo', '神奈川県': 'kanagawa',
+    '新潟県': 'niigata', '山梨県': 'yamanashi', '長野県': 'nagano',
+    '富山県': 'toyama', '石川県': 'ishikawa', '福井県': 'fukui',
+    '岐阜県': 'gifu', '静岡県': 'shizuoka', '愛知県': 'aichi', '三重県': 'mie',
+    '滋賀県': 'shiga', '京都府': 'kyoto', '大阪府': 'osaka', '兵庫県': 'hyogo', '奈良県': 'nara', '和歌山県': 'wakayama',
+    '鳥取県': 'tottori', '島根県': 'shimane', '岡山県': 'okayama', '広島県': 'hiroshima', '山口県': 'yamaguchi',
+    '徳島県': 'tokushima', '香川県': 'kagawa', '愛媛県': 'ehime', '高知県': 'kochi',
+    '福岡県': 'fukuoka', '佐賀県': 'saga', '長崎県': 'nagasaki', '熊本県': 'kumamoto', '大分県': 'oita', '宮崎県': 'miyazaki', '鹿児島県': 'kagoshima', '沖縄県': 'okinawa',
+};
+
+// マイナビ職種カテゴリマッピング
+const jobTypeCodes: Record<string, string> = {
+    '営業・販売': 'ss010',
+    '経営・事業企画・人事・事務': 'ss020',
+    'IT・Web・ゲームエンジニア': 'ss030',
+    'モノづくりエンジニア': 'ss040',
+    'コンサルタント・士業・金融': 'ss050',
+    'サービス・販売・接客': 'ss060',
+    '不動産・建設': 'ss070',
+    '物流・運輸・運転': 'ss080',
+    '医療・福祉・介護': 'ss090',
+    'クリエイティブ・マスコミ': 'ss100',
+    '教育・保育': 'ss110',
+    'その他': 'ss990',
+};
+
 // 求人カードのセレクター候補（優先順位順）
 const JOB_CARD_SELECTORS = [
     '.cassetteRecruitRecommend__content',  // 実際のHTML構造
@@ -55,14 +85,14 @@ export class MynaviStrategy implements ScrapingStrategy {
     private readonly PAGE_INTERVAL = 5000;     // 5秒
 
     async *scrape(page: Page, params: ScrapingParams, onLog?: (message: string) => void): AsyncGenerator<CompanyData> {
-        const { keywords, location } = params;
+        const { keywords, location, prefectures, jobTypes } = params;
 
         const log = (msg: string) => {
             if (onLog) onLog(msg);
             else console.log(`[Mynavi] ${msg}`);
         };
 
-        // 検索結果ページ
+        // 検索結果ページのURLを構築
         let searchUrl = 'https://tenshoku.mynavi.jp/list/';
 
         // キーワード検索
@@ -70,10 +100,30 @@ export class MynaviStrategy implements ScrapingStrategy {
             searchUrl += `?searchKeyword=${encodeURIComponent(keywords)}`;
         }
 
-        // エリア指定
-        if (location) {
+        // 都道府県指定（複数対応）
+        if (prefectures && prefectures.length > 0) {
+            const codes = prefectures
+                .map(pref => prefectureCodes[pref])
+                .filter(code => code);
+            if (codes.length > 0) {
+                const separator = searchUrl.includes('?') ? '&' : '?';
+                searchUrl += `${separator}ar=${codes.join(',')}`;
+            }
+        } else if (location) {
+            // 後方互換: 単一location指定
             const separator = searchUrl.includes('?') ? '&' : '?';
             searchUrl += `${separator}locationCodes=${encodeURIComponent(location)}`;
+        }
+
+        // 職種指定（複数対応）
+        if (jobTypes && jobTypes.length > 0) {
+            const codes = jobTypes
+                .map(jt => jobTypeCodes[jt])
+                .filter(code => code);
+            if (codes.length > 0) {
+                const separator = searchUrl.includes('?') ? '&' : '?';
+                searchUrl += `${separator}ss=${codes.join(',')}`;
+            }
         }
 
         log(`Navigating to: ${searchUrl}`);
