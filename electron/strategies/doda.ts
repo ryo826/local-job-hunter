@@ -238,17 +238,29 @@ export class DodaStrategy implements ScrapingStrategy {
                     }
 
                     // 会社概要タブに直接ナビゲート（URLを変更）
-                    // -tab__pr を -tab__co に置換
-                    const companyTabUrl = fullUrl.replace(/-tab__pr\/?$/, '-tab__co/').replace(/-tab__pr\//, '-tab__co/');
-                    if (companyTabUrl !== fullUrl) {
-                        log(`Navigating to company tab: ${companyTabUrl}`);
-                        try {
-                            await page.goto(companyTabUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                            await page.waitForTimeout(randomDelay(2000, 4000));
-                            log('Company tab page loaded');
-                        } catch (error: any) {
-                            log(`Failed to navigate to company tab: ${error.message}`);
-                        }
+                    // URL形式: /j_jid__xxx/-tab__co/-fm__jobdetail/
+                    // 既存のURLから会社概要URLを構築
+                    let companyTabUrl = fullUrl;
+
+                    // -tab__XX/-fm__XX/ パターンを置換
+                    if (fullUrl.includes('-tab__')) {
+                        companyTabUrl = fullUrl.replace(/-tab__[a-z]+\/-fm__[a-z]+\/?/, '-tab__co/-fm__jobdetail/');
+                        companyTabUrl = companyTabUrl.replace(/-tab__[a-z]+\/?$/, '-tab__co/-fm__jobdetail/');
+                    } else {
+                        // タブがない場合は追加
+                        companyTabUrl = fullUrl.replace(/\/?$/, '/-tab__co/-fm__jobdetail/');
+                    }
+
+                    // 末尾のスラッシュを正規化
+                    companyTabUrl = companyTabUrl.replace(/\/+$/, '/');
+
+                    log(`Navigating to company tab: ${companyTabUrl}`);
+                    try {
+                        await page.goto(companyTabUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                        await page.waitForTimeout(randomDelay(2000, 4000));
+                        log('Company tab page loaded, URL: ' + page.url());
+                    } catch (error: any) {
+                        log(`Failed to navigate to company tab: ${error.message}`);
                     }
 
                     // ページの最下部までスクロールしてコンテンツを読み込む
