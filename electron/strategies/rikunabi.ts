@@ -1,5 +1,6 @@
 import { Page } from 'playwright';
 import { ScrapingStrategy, CompanyData, ScrapingParams } from './ScrapingStrategy';
+import { normalizeIndustry, normalizeArea, normalizeSalary, normalizeEmployees } from '../utils/data-normalizer';
 
 // ランダム待機時間のヘルパー関数
 function randomDelay(min: number, max: number): number {
@@ -256,16 +257,16 @@ export class RikunabiStrategy implements ScrapingStrategy {
                         url: page.url(),
                         company_name: cleanName,
                         job_title: jobTitle,
-                        salary_text: jobDetails['給与'] || '',
+                        salary_text: normalizeSalary(jobDetails['給与']),
                         representative: companyInfo['代表者'] || '',
                         establishment: companyInfo['設立'] || '',
-                        employees: companyInfo['従業員数'] || '',
+                        employees: normalizeEmployees(companyInfo['従業員数']),
                         revenue: companyInfo['売上高'] || '',
                         phone: companyInfo['企業代表番号'] || '',
                         address: normalizedAddress,
-                        area: this.extractAreaFromAddress(normalizedAddress),
+                        area: normalizeArea(this.extractAreaFromAddress(normalizedAddress)),
                         homepage_url: companyInfo['企業HP'] || '',
-                        industry: companyInfo['事業内容'] || '',
+                        industry: normalizeIndustry(companyInfo['事業内容']),
                         scrape_status: 'step1_completed',
                     };
 

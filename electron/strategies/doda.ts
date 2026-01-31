@@ -1,5 +1,6 @@
 import { Page } from 'playwright';
 import { ScrapingStrategy, CompanyData, ScrapingParams } from './ScrapingStrategy';
+import { normalizeIndustry, normalizeArea, normalizeSalary, normalizeEmployees } from '../utils/data-normalizer';
 
 // ランダム待機時間のヘルパー関数
 function randomDelay(min: number, max: number): number {
@@ -248,16 +249,16 @@ export class DodaStrategy implements ScrapingStrategy {
                         url: fullUrl,
                         company_name: cleanName,
                         job_title: jobTitle,
-                        salary_text: salaryText,
+                        salary_text: normalizeSalary(salaryText),
                         representative,
                         establishment,
-                        employees,
+                        employees: normalizeEmployees(employees),
                         revenue,
                         phone: undefined, // 電話番号はGoogle Maps APIで取得
                         address: normalizedAddress,
-                        area: this.extractAreaFromAddress(normalizedAddress) || locationFromList,
+                        area: normalizeArea(this.extractAreaFromAddress(normalizedAddress) || locationFromList),
                         homepage_url: companyUrl,
-                        industry,
+                        industry: normalizeIndustry(industry),
                         scrape_status: 'step1_completed',
                     };
 

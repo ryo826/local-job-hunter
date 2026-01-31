@@ -1,6 +1,7 @@
 
 import { Page } from 'playwright';
 import { ScrapingStrategy, CompanyData, ScrapingParams } from './ScrapingStrategy';
+import { normalizeIndustry, normalizeArea, normalizeSalary, normalizeEmployees } from '../utils/data-normalizer';
 
 // ランダム待機時間のヘルパー関数
 function randomDelay(min: number, max: number): number {
@@ -324,16 +325,16 @@ export class MynaviStrategy implements ScrapingStrategy {
                         url: jobInfo.url,
                         company_name: cleanName,
                         job_title: jobTitle,
-                        salary_text: salaryText,
+                        salary_text: normalizeSalary(salaryText),
                         representative,
                         establishment,
-                        employees,
+                        employees: normalizeEmployees(employees),
                         revenue,
                         phone: phone, // 求人ページのテーブルから取得できた場合のみ
                         address: normalizedAddress,
-                        area: this.extractAreaFromAddress(normalizedAddress),
+                        area: normalizeArea(this.extractAreaFromAddress(normalizedAddress)),
                         homepage_url: companyUrl,
-                        industry,
+                        industry: normalizeIndustry(industry),
                         job_description: jobDescription,
                         scrape_status: 'step1_completed',
                     };
