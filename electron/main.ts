@@ -2,11 +2,32 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
+import { spawn } from 'child_process';
 
-// Ensure UTF-8 encoding for console output on Windows
+// Windows console UTF-8 fix
 if (process.platform === 'win32') {
+    // Set console code page to UTF-8
+    try {
+        spawn('chcp', ['65001'], { shell: true, stdio: 'ignore' });
+    } catch (e) {
+        // ignore
+    }
+
+    // Set output encoding
     process.stdout.setDefaultEncoding?.('utf8');
     process.stderr.setDefaultEncoding?.('utf8');
+
+    // Override console.log to handle encoding
+    const originalLog = console.log;
+    console.log = (...args: any[]) => {
+        const output = args.map(arg => {
+            if (typeof arg === 'string') {
+                return arg;
+            }
+            return String(arg);
+        }).join(' ');
+        originalLog(output);
+    };
 }
 import { initDB, companyRepository } from './database';
 import { ScrapingEngine } from './scraping-engine';
