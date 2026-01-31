@@ -239,18 +239,25 @@ export class DodaStrategy implements ScrapingStrategy {
 
                     // 会社概要タブをクリック (URLのtabパラメータを変更)
                     // タブリンク: a[href*="-tab__"]
+                    log('Looking for company tab...');
                     const companyTabLink = page.locator('a[href*="-tab__co"], a:has-text("会社概要")').first();
                     if (await companyTabLink.count() > 0) {
                         try {
+                            log('Clicking company tab...');
                             await companyTabLink.click();
                             await page.waitForTimeout(randomDelay(2000, 4000));
+                            log('Company tab clicked, current URL: ' + page.url());
                         } catch (error) {
                             log(`Could not click company tab: ${error}`);
                         }
+                    } else {
+                        log('Company tab not found');
                     }
 
                     // 企業情報を抽出 (DescriptionList構造)
+                    log('Extracting company URL...');
                     const companyUrl = await this.extractCompanyUrl(page, log);
+                    log(`Company URL result: ${companyUrl || 'not found'}`);
                     const address = await this.extractDescriptionValue(page, '本社所在地') ||
                         await this.extractDescriptionValue(page, '所在地') ||
                         await this.extractDescriptionValue(page, '勤務地');
@@ -391,12 +398,22 @@ export class DodaStrategy implements ScrapingStrategy {
     // 企業URLを抽出 (DescriptionList内の企業URLリンク)
     private async extractCompanyUrl(page: Page, log: (msg: string) => void): Promise<string | undefined> {
         try {
+            // デバッグ: ページ上のすべてのdt要素のテキストを取得
+            const allDts = await page.locator('dt').all();
+            const dtTexts: string[] = [];
+            for (const dt of allDts.slice(0, 20)) { // 最初の20個まで
+                const text = await dt.textContent();
+                if (text) dtTexts.push(text.trim());
+            }
+            log(`Found dt labels: ${dtTexts.join(', ')}`);
+
             // 企業URLセクションのリンクを探す（複数のセレクターを試す）
             const linkSelectors = [
                 'a.jobSearchDetail-companyOverview__link',
                 'a[class*="companyOverview__link"]',
                 'a[class*="companyUrl"]',
                 'a[class*="corporateUrl"]',
+                'dd a[href^="http"]', // dd内の外部リンク
             ];
 
             for (const selector of linkSelectors) {
@@ -415,11 +432,33 @@ export class DodaStrategy implements ScrapingStrategy {
             for (const label of labels) {
                 const urlValue = await this.extractDescriptionValue(page, label);
                 if (urlValue) {
+                    log(`Label "${label}" value: ${urlValue.substring(0, 100)}`);
                     // URLを抽出 (テキストからURLを取り出す)
                     const urlMatch = urlValue.match(/https?:\/\/[^\s<>"]+/);
                     if (urlMatch) {
                         log(`Found company URL via label "${label}": ${urlMatch[0]}`);
                         return urlMatch[0];
+                    }
+                }
+            }
+
+            // dt/ddの「企業URL」行を直接探す
+            const dtElements = await page.locator('dt').all();
+            for (const dt of dtElements) {
+                const dtText = await dt.textContent();
+                if (dtText && dtText.includes('URL')) {
+                    log(`Found dt with URL: "${dtText}"`);
+                    // 隣接するddを探す
+                    const dd = dt.locator('+ dd, ~ dd').first();
+                    if (await dd.count() > 0) {
+                        const ddLink = dd.locator('a').first();
+                        if (await ddLink.count() > 0) {
+                            const href = await ddLink.getAttribute('href');
+                            if (href && !href.includes('doda.jp')) {
+                                log(`Found company URL via adjacent dd: ${href}`);
+                                return href;
+                            }
+                        }
                     }
                 }
             }
@@ -436,8 +475,10 @@ export class DodaStrategy implements ScrapingStrategy {
                     }
                 }
             }
-        } catch (error) {
-            // ignore
+
+            log('No company URL found');
+        } catch (error: any) {
+            log(`Error extracting company URL: ${error.message}`);
         }
         return undefined;
     }
