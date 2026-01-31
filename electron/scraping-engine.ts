@@ -5,6 +5,7 @@ import { JobRepository } from './repositories/JobRepository';
 import { ScrapingLogRepository } from './repositories/ScrapingLogRepository';
 import { UpsertService } from './services/UpsertService';
 import { DataConverter } from './services/DataConverter';
+import { getGoogleMapsService } from './services/GoogleMapsService';
 import Database from 'better-sqlite3';
 import path from 'path';
 import { app } from 'electron';
@@ -148,6 +149,33 @@ export class ScrapingEngine {
 
                         // 既存: CompanyDataとして保存(B2B営業用)
                         companyRepository.safeUpsert(company as any);
+
+                        // 電話番号がない場合はGoogle Maps APIで取得
+                        if (!company.phone) {
+                            const googleMapsService = getGoogleMapsService();
+                            if (googleMapsService) {
+                                try {
+                                    log(`電話番号を検索中: ${company.company_name}`);
+                                    const phone = await googleMapsService.findCompanyPhone(
+                                        company.company_name,
+                                        company.address
+                                    );
+                                    if (phone) {
+                                        company.phone = phone;
+                                        // URLで会社を検索してIDを取得し、電話番号を更新
+                                        const savedCompany = this.db.prepare('SELECT id FROM companies WHERE url = ?').get(company.url) as { id: number } | undefined;
+                                        if (savedCompany) {
+                                            companyRepository.update(savedCompany.id, { phone });
+                                        }
+                                        log(`電話番号取得: ${phone}`);
+                                    } else {
+                                        log(`電話番号が見つかりませんでした`);
+                                    }
+                                } catch (phoneError) {
+                                    console.error(`Phone lookup error for ${company.company_name}:`, phoneError);
+                                }
+                            }
+                        }
 
                         // 新規: Job型に変換して保存(求人情報管理用)
                         try {
