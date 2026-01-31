@@ -567,10 +567,18 @@ export class MynaviStrategy implements ScrapingStrategy {
 
     private cleanCompanyName(name: string): string {
         return name
-            .replace(/株式会社|有限会社|合同会社|一般社団法人|公益財団法人/g, '')
-            .replace(/【.*?】/g, '')
-            .replace(/\(.*?\)/g, '')
-            .replace(/（.*?）/g, '')
+            // パイプ以降を削除（求人タイトルが含まれている場合）
+            .split(/[|｜]/)[0]
+            // 【】内のプロモーション文のみ削除（株式会社等の法人格は保持）
+            .replace(/【プライム市場】|【スタンダード市場】|【グロース市場】|【東証一部】|【東証二部】|【TOKYO PRO Market上場】|【急募】|【未経験歓迎】/g, '')
+            // グループ会社の補足表記を削除
+            .replace(/\(.*グループ.*\)/g, '')
+            .replace(/（.*グループ.*）/g, '')
+            // 全角英数字を半角に変換
+            .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+            // 全角スペースを半角に
+            .replace(/　/g, ' ')
+            // 余分な空白を整理
             .replace(/\s+/g, ' ')
             .trim();
     }

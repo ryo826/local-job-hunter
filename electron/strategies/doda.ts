@@ -223,8 +223,8 @@ export class DodaStrategy implements ScrapingStrategy {
 
                     // 企業情報を抽出 (DescriptionList構造)
                     const companyUrl = await this.extractCompanyUrl(page);
-                    const address = await this.extractDescriptionValue(page, '所在地') ||
-                        await this.extractDescriptionValue(page, '本社所在地') ||
+                    const address = await this.extractDescriptionValue(page, '本社所在地') ||
+                        await this.extractDescriptionValue(page, '所在地') ||
                         await this.extractDescriptionValue(page, '勤務地');
                     const industry = await this.extractDescriptionValue(page, '事業概要') ||
                         await this.extractDescriptionValue(page, '事業内容') ||
