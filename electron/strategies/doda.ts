@@ -237,45 +237,54 @@ export class DodaStrategy implements ScrapingStrategy {
                         continue;
                     }
 
-                    // 会社概要タブに直接ナビゲート（URLを変更）
-                    // URL形式: /j_jid__xxx/-tab__co/-fm__jobdetail/
-                    // 既存のURLから会社概要URLを構築
-                    let companyTabUrl = fullUrl;
+                    // 正しいURL形式: /-tab__jd/-fm__jobdetail/
+                    // 会社概要は同じページ内でスクロールした先にある
+                    let jobDetailUrl = fullUrl;
 
-                    // -tab__XX/-fm__XX/ パターンを置換
-                    if (fullUrl.includes('-tab__')) {
-                        companyTabUrl = fullUrl.replace(/-tab__[a-z]+\/-fm__[a-z]+\/?/, '-tab__co/-fm__jobdetail/');
-                        companyTabUrl = companyTabUrl.replace(/-tab__[a-z]+\/?$/, '-tab__co/-fm__jobdetail/');
-                    } else {
-                        // タブがない場合は追加
-                        companyTabUrl = fullUrl.replace(/\/?$/, '/-tab__co/-fm__jobdetail/');
+                    // URLに-tab__jd/-fm__jobdetail/がない場合は修正
+                    if (!fullUrl.includes('-fm__jobdetail')) {
+                        if (fullUrl.includes('-tab__')) {
+                            jobDetailUrl = fullUrl.replace(/-tab__[a-z]+\/?$/, '-tab__jd/-fm__jobdetail/');
+                        } else {
+                            jobDetailUrl = fullUrl.replace(/\/?$/, '/-tab__jd/-fm__jobdetail/');
+                        }
+                        jobDetailUrl = jobDetailUrl.replace(/\/+/g, '/').replace(':/', '://');
+
+                        log(`Navigating to job detail page: ${jobDetailUrl}`);
+                        try {
+                            await page.goto(jobDetailUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                            await page.waitForTimeout(randomDelay(2000, 4000));
+                            log('Job detail page loaded');
+                        } catch (error: any) {
+                            log(`Failed to navigate to job detail: ${error.message}`);
+                        }
                     }
 
-                    // 末尾のスラッシュを正規化
-                    companyTabUrl = companyTabUrl.replace(/\/+$/, '/');
+                    // ページ全体をスクロールして会社概要セクションを読み込む
+                    log('Scrolling to load company overview section...');
+                    await page.evaluate(async () => {
+                        // 徐々にスクロールして遅延読み込みをトリガー
+                        const scrollStep = 500;
+                        let currentPosition = 0;
+                        const maxScroll = document.body.scrollHeight;
 
-                    log(`Navigating to company tab: ${companyTabUrl}`);
-                    try {
-                        await page.goto(companyTabUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                        await page.waitForTimeout(randomDelay(2000, 4000));
-                        log('Company tab page loaded, URL: ' + page.url());
-                    } catch (error: any) {
-                        log(`Failed to navigate to company tab: ${error.message}`);
-                    }
+                        while (currentPosition < maxScroll) {
+                            currentPosition += scrollStep;
+                            window.scrollTo(0, currentPosition);
+                            await new Promise(resolve => setTimeout(resolve, 200));
+                        }
 
-                    // ページの最下部までスクロールしてコンテンツを読み込む
-                    log('Scrolling to load content...');
-                    await page.evaluate(() => {
+                        // 最下部まで確実にスクロール
                         window.scrollTo(0, document.body.scrollHeight);
                     });
                     await page.waitForTimeout(2000);
 
                     // 会社概要セクションが表示されるまで待つ
                     try {
-                        await page.waitForSelector('dt, .DescriptionList-module_descriptionList__columnTitle__CQLXG', { timeout: 5000 });
-                        log('Description list elements appeared');
+                        await page.waitForSelector('a.jobSearchDetail-companyOverview__link, dt', { timeout: 5000 });
+                        log('Company overview elements found');
                     } catch {
-                        log('Description list elements not found within timeout');
+                        log('Company overview elements not found within timeout');
                     }
 
                     // 企業情報を抽出 (DescriptionList構造)
