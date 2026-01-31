@@ -237,6 +237,13 @@ export class DodaStrategy implements ScrapingStrategy {
                         continue;
                     }
 
+                    // 会社概要セクションまでスクロール
+                    log('Scrolling to company overview section...');
+                    await page.evaluate(() => {
+                        window.scrollTo(0, document.body.scrollHeight / 2);
+                    });
+                    await page.waitForTimeout(1000);
+
                     // 会社概要タブをクリック (URLのtabパラメータを変更)
                     // タブリンク: a[href*="-tab__"]
                     log('Looking for company tab...');
@@ -251,7 +258,15 @@ export class DodaStrategy implements ScrapingStrategy {
                             log(`Could not click company tab: ${error}`);
                         }
                     } else {
-                        log('Company tab not found');
+                        log('Company tab not found, trying to find company URL on current page...');
+                    }
+
+                    // 会社概要セクションが表示されるまで待つ
+                    try {
+                        await page.waitForSelector('a.jobSearchDetail-companyOverview__link', { timeout: 5000 });
+                        log('Company overview link appeared');
+                    } catch {
+                        log('Company overview link not found within timeout');
                     }
 
                     // 企業情報を抽出 (DescriptionList構造)
@@ -418,8 +433,11 @@ export class DodaStrategy implements ScrapingStrategy {
 
             for (const selector of linkSelectors) {
                 const companyLink = page.locator(selector).first();
-                if (await companyLink.count() > 0) {
+                const count = await companyLink.count();
+                log(`Selector "${selector}" found ${count} elements`);
+                if (count > 0) {
                     const href = await companyLink.getAttribute('href');
+                    log(`  href: ${href}`);
                     if (href && !href.includes('doda.jp')) {
                         log(`Found company URL via selector ${selector}: ${href}`);
                         return href;
