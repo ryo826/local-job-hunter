@@ -343,10 +343,27 @@ export function SearchPage() {
                     <Card className="sticky top-8 h-fit p-6">
                         <h2 className="mb-4 text-lg font-semibold">実行中...</h2>
                         <div className="space-y-4">
+                            {/* 総件数と推定時間 */}
+                            {scrapingProgress.totalJobs !== undefined && (
+                                <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
+                                    <p className="text-sm font-medium text-blue-800">
+                                        条件に合う求人: <span className="text-lg">{scrapingProgress.totalJobs.toLocaleString()}</span>件
+                                    </p>
+                                    {scrapingProgress.estimatedMinutes !== undefined && scrapingProgress.estimatedMinutes > 0 && (
+                                        <p className="text-xs text-blue-600 mt-1">
+                                            残り約 {scrapingProgress.estimatedMinutes} 分
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
                             <div>
                                 <div className="mb-2 flex items-center justify-between text-sm">
                                     <span>進捗</span>
-                                    <span className="font-semibold">{Math.round(progressPercentage)}%</span>
+                                    <span className="font-semibold">
+                                        {scrapingProgress.current} / {scrapingProgress.totalJobs ?? '?'} 件
+                                        ({Math.round(progressPercentage)}%)
+                                    </span>
                                 </div>
                                 <Progress value={progressPercentage} className="h-2" />
                             </div>

@@ -35,4 +35,5 @@ export interface ScrapingStrategy {
     readonly source: string;
     login?(page: Page): Promise<void>;
     scrape(page: Page, params: ScrapingParams, onLog?: (message: string) => void): AsyncGenerator<CompanyData>;
+    getTotalJobCount?(page: Page, params: ScrapingParams): Promise<number | undefined>;
 }

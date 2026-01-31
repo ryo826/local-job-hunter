@@ -45,6 +45,9 @@ export interface ScrapingProgress {
     duplicateCount: number;
     source: string;
     status: string;
+    totalJobs?: number;          // 検索条件に合った総求人件数
+    estimatedMinutes?: number;   // 完了までの推定時間（分）
+    startTime?: number;          // スクレイピング開始時刻
 }
 
 // 新規: Job型とJobFilters型をエクスポート

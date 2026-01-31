@@ -579,4 +579,78 @@ export class MynaviStrategy implements ScrapingStrategy {
         const match = address.match(/([東京大阪京都神奈川埼玉千葉愛知北海道福岡].*?[都道府県市区町村])/);
         return match ? match[1] : '';
     }
+
+    // 検索URLを構築するヘルパーメソッド
+    private buildSearchUrl(params: ScrapingParams): string {
+        const { keywords, location, prefectures, jobTypes } = params;
+        let searchUrl = 'https://tenshoku.mynavi.jp/list/';
+
+        if (keywords) {
+            searchUrl += `?searchKeyword=${encodeURIComponent(keywords)}`;
+        }
+
+        if (prefectures && prefectures.length > 0) {
+            const codes = prefectures
+                .map(pref => prefectureCodes[pref])
+                .filter(code => code);
+            if (codes.length > 0) {
+                const separator = searchUrl.includes('?') ? '&' : '?';
+                searchUrl += `${separator}ar=${codes.join(',')}`;
+            }
+        } else if (location) {
+            const separator = searchUrl.includes('?') ? '&' : '?';
+            searchUrl += `${separator}locationCodes=${encodeURIComponent(location)}`;
+        }
+
+        if (jobTypes && jobTypes.length > 0) {
+            const codes = jobTypes
+                .map(jt => jobTypeCodes[jt])
+                .filter(code => code);
+            if (codes.length > 0) {
+                const separator = searchUrl.includes('?') ? '&' : '?';
+                searchUrl += `${separator}ss=${codes.join(',')}`;
+            }
+        }
+
+        return searchUrl;
+    }
+
+    // 総求人件数を取得
+    async getTotalJobCount(page: Page, params: ScrapingParams): Promise<number | undefined> {
+        try {
+            const searchUrl = this.buildSearchUrl(params);
+            await page.goto(searchUrl, { waitUntil: 'networkidle', timeout: 30000 });
+            await page.waitForTimeout(2000);
+
+            // マイナビの検索結果件数を取得（例: "1,234件"）
+            const countSelectors = [
+                '.result__num',
+                '.searchResult__num',
+                '[class*="result"] [class*="num"]',
+                'text=/\\d+件/',
+            ];
+
+            for (const selector of countSelectors) {
+                try {
+                    const element = page.locator(selector).first();
+                    if (await element.count() > 0) {
+                        const text = await element.textContent();
+                        if (text) {
+                            const match = text.match(/([0-9,]+)/);
+                            if (match) {
+                                return parseInt(match[1].replace(/,/g, ''), 10);
+                            }
+                        }
+                    }
+                } catch {
+                    // セレクターがマッチしない場合は次へ
+                }
+            }
+
+            return undefined;
+        } catch (error) {
+            console.error('Failed to get total job count:', error);
+            return undefined;
+        }
+    }
 }

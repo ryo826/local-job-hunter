@@ -491,4 +491,74 @@ export class DodaStrategy implements ScrapingStrategy {
 
         return '';
     }
+
+    // 検索URLを構築するヘルパーメソッド
+    private buildSearchUrl(params: ScrapingParams): string {
+        const { keywords, prefectures, jobTypes } = params;
+        let searchUrl = 'https://doda.jp/DodaFront/View/JobSearchList.action';
+
+        if (keywords) {
+            searchUrl += `?kw=${encodeURIComponent(keywords)}`;
+        }
+
+        if (prefectures && prefectures.length > 0) {
+            const codes = prefectures
+                .map(pref => prefectureCodes[pref])
+                .filter(code => code);
+            if (codes.length > 0) {
+                const separator = searchUrl.includes('?') ? '&' : '?';
+                searchUrl += `${separator}pr=${codes.join(',')}`;
+            }
+        }
+
+        if (jobTypes && jobTypes.length > 0) {
+            const codes = jobTypes
+                .map(jt => jobTypeCodes[jt])
+                .filter(code => code);
+            if (codes.length > 0) {
+                const separator = searchUrl.includes('?') ? '&' : '?';
+                searchUrl += `${separator}oc=${codes.join(',')}`;
+            }
+        }
+
+        return searchUrl;
+    }
+
+    // 総求人件数を取得
+    async getTotalJobCount(page: Page, params: ScrapingParams): Promise<number | undefined> {
+        try {
+            const searchUrl = this.buildSearchUrl(params);
+            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.waitForTimeout(3000);
+
+            // dodaの検索結果件数を取得（例: "1,234件"）
+            const countSelectors = [
+                '.jobSearchResult__count',
+                '[class*="searchResult"] [class*="count"]',
+                '.searchResult__number',
+            ];
+
+            for (const selector of countSelectors) {
+                try {
+                    const element = page.locator(selector).first();
+                    if (await element.count() > 0) {
+                        const text = await element.textContent();
+                        if (text) {
+                            const match = text.match(/([0-9,]+)/);
+                            if (match) {
+                                return parseInt(match[1].replace(/,/g, ''), 10);
+                            }
+                        }
+                    }
+                } catch {
+                    // セレクターがマッチしない場合は次へ
+                }
+            }
+
+            return undefined;
+        } catch (error) {
+            console.error('Failed to get total job count:', error);
+            return undefined;
+        }
+    }
 }

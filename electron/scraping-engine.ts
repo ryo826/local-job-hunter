@@ -16,6 +16,9 @@ export interface ScrapingProgress {
     source: string;
     newCount: number;
     duplicateCount: number;
+    totalJobs?: number;          // 検索条件に合った総求人件数
+    estimatedMinutes?: number;   // 完了までの推定時間（分）
+    startTime?: number;          // スクレイピング開始時刻
 }
 
 export class ScrapingEngine {
@@ -105,6 +108,23 @@ export class ScrapingEngine {
                 let newCount = 0;
                 let duplicateCount = 0;
                 let current = 0;
+                let totalJobs: number | undefined = undefined;
+                const scrapeStartTime = Date.now();
+
+                // 総求人件数を取得
+                if (strategy.getTotalJobCount) {
+                    onProgress({
+                        current: 0, total: 0, newCount: 0, duplicateCount: 0,
+                        source: strategy.source,
+                        status: '総件数を取得中...'
+                    });
+                    try {
+                        totalJobs = await strategy.getTotalJobCount(page, params);
+                        onLog?.(`[${strategy.source}] Total jobs found: ${totalJobs ?? 'unknown'}`);
+                    } catch (e) {
+                        onLog?.(`[${strategy.source}] Failed to get total job count: ${e}`);
+                    }
+                }
 
                 try {
                     const log = (msg: string) => {
@@ -144,19 +164,38 @@ export class ScrapingEngine {
                             errors++;
                         }
 
+                        // 推定時間を計算（1件あたり約10秒として計算）
+                        const elapsedMs = Date.now() - scrapeStartTime;
+                        const avgTimePerJob = current > 0 ? elapsedMs / current : 10000;
+                        const remainingJobs = totalJobs ? Math.max(0, totalJobs - current) : 0;
+                        const estimatedMinutes = totalJobs
+                            ? Math.ceil((remainingJobs * avgTimePerJob) / 60000)
+                            : undefined;
+
                         onProgress({
-                            current, total: current, newCount, duplicateCount,
+                            current,
+                            total: totalJobs ?? current,
+                            newCount,
+                            duplicateCount,
                             source: strategy.source,
-                            status: 'スクレイピング中...'
+                            status: 'スクレイピング中...',
+                            totalJobs,
+                            estimatedMinutes,
+                            startTime: scrapeStartTime,
                         });
                     }
                 } catch (e: any) {
                     console.error(`Error in strategy ${strategy.source}:`, e);
                     errors++;
                     onProgress({
-                        current, total: current, newCount, duplicateCount,
+                        current,
+                        total: totalJobs ?? current,
+                        newCount,
+                        duplicateCount,
                         source: strategy.source,
-                        status: `エラー発生: ${e.message}`
+                        status: `エラー発生: ${e.message}`,
+                        totalJobs,
+                        startTime: scrapeStartTime,
                     });
                 } finally {
                     await page.close();
