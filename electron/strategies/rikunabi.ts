@@ -605,27 +605,17 @@ export class RikunabiStrategy implements ScrapingStrategy {
             await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
             await page.waitForTimeout(3000);
 
-            // リクナビNEXTの検索結果件数を取得（例: "1,234件"）
-            const countSelectors = [
-                '[class*="styles_searchCount"]',
-                '[class*="searchResult"] [class*="count"]',
-                'text=/\\d+,?\\d*件/',
-            ];
-
-            for (const selector of countSelectors) {
-                try {
-                    const element = page.locator(selector).first();
-                    if (await element.count() > 0) {
-                        const text = await element.textContent();
-                        if (text) {
-                            const match = text.match(/([0-9,]+)/);
-                            if (match) {
-                                return parseInt(match[1].replace(/,/g, ''), 10);
-                            }
-                        }
+            // リクナビNEXTの検索結果件数を取得
+            // セレクタ: .styles_bodyText__KY7__ (数字+「件」or「件以上」: 1475件以上, 1702件)
+            const element = page.locator('.styles_bodyText__KY7__').first();
+            if (await element.count() > 0) {
+                const text = await element.textContent();
+                if (text) {
+                    // "1475件以上" or "1702件" から数字を抽出
+                    const match = text.match(/([0-9,]+)/);
+                    if (match) {
+                        return parseInt(match[1].replace(/,/g, ''), 10);
                     }
-                } catch {
-                    // セレクターがマッチしない場合は次へ
                 }
             }
 

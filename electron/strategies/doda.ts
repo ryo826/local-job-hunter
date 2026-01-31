@@ -667,27 +667,17 @@ export class DodaStrategy implements ScrapingStrategy {
             await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
             await page.waitForTimeout(3000);
 
-            // dodaの検索結果件数を取得（例: "1,234件"）
-            const countSelectors = [
-                '.jobSearchResult__count',
-                '[class*="searchResult"] [class*="count"]',
-                '.searchResult__number',
-            ];
-
-            for (const selector of countSelectors) {
-                try {
-                    const element = page.locator(selector).first();
-                    if (await element.count() > 0) {
-                        const text = await element.textContent();
-                        if (text) {
-                            const match = text.match(/([0-9,]+)/);
-                            if (match) {
-                                return parseInt(match[1].replace(/,/g, ''), 10);
-                            }
-                        }
+            // dodaの検索結果件数を取得
+            // セレクタ: .search-sidebar__total-count__number (カンマ区切り数字: 268,576)
+            const element = page.locator('.search-sidebar__total-count__number').first();
+            if (await element.count() > 0) {
+                const text = await element.textContent();
+                if (text) {
+                    // カンマを除去して数値に変換
+                    const num = parseInt(text.replace(/,/g, ''), 10);
+                    if (!isNaN(num)) {
+                        return num;
                     }
-                } catch {
-                    // セレクターがマッチしない場合は次へ
                 }
             }
 

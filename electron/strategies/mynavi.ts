@@ -673,28 +673,16 @@ export class MynaviStrategy implements ScrapingStrategy {
             await page.goto(searchUrl, { waitUntil: 'networkidle', timeout: 30000 });
             await page.waitForTimeout(2000);
 
-            // マイナビの検索結果件数を取得（例: "1,234件"）
-            const countSelectors = [
-                '.result__num',
-                '.searchResult__num',
-                '[class*="result"] [class*="num"]',
-                'text=/\\d+件/',
-            ];
-
-            for (const selector of countSelectors) {
-                try {
-                    const element = page.locator(selector).first();
-                    if (await element.count() > 0) {
-                        const text = await element.textContent();
-                        if (text) {
-                            const match = text.match(/([0-9,]+)/);
-                            if (match) {
-                                return parseInt(match[1].replace(/,/g, ''), 10);
-                            }
-                        }
+            // マイナビの検索結果件数を取得
+            // セレクタ: .js__searchRecruit--count (カンマなし数字: 51740)
+            const element = page.locator('.js__searchRecruit--count').first();
+            if (await element.count() > 0) {
+                const text = await element.textContent();
+                if (text) {
+                    const num = parseInt(text.replace(/,/g, ''), 10);
+                    if (!isNaN(num)) {
+                        return num;
                     }
-                } catch {
-                    // セレクターがマッチしない場合は次へ
                 }
             }
 
