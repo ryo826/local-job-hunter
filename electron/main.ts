@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import dotenv from 'dotenv';
 import { initDB, companyRepository } from './database';
 import { ScrapingEngine } from './scraping-engine';
@@ -11,8 +12,31 @@ import { getExportService } from './services/ExportService';
 const envPath = app.isPackaged
     ? path.join(process.resourcesPath, '.env')
     : path.join(__dirname, '../../.env');
-dotenv.config({ path: envPath });
 console.log('[Main] Loading .env from:', envPath);
+
+// Check if file exists and read content for debugging
+if (fs.existsSync(envPath)) {
+    console.log('[Main] .env file exists');
+    const content = fs.readFileSync(envPath, 'utf-8');
+    const lines = content.split('\n').filter(line => line.trim() && !line.startsWith('#'));
+    console.log('[Main] .env non-comment lines:', lines.length);
+
+    // Parse manually to avoid encoding issues
+    for (const line of lines) {
+        const match = line.match(/^([^=]+)=(.*)$/);
+        if (match) {
+            const key = match[1].trim();
+            const value = match[2].trim();
+            process.env[key] = value;
+            console.log(`[Main] Set ${key}: ${value ? 'yes' : 'no'}`);
+        }
+    }
+} else {
+    console.log('[Main] .env file NOT found at:', envPath);
+    // Fallback: also try dotenv
+    dotenv.config({ path: envPath });
+}
+
 console.log('[Main] GOOGLE_MAPS_API_KEY set:', !!process.env.GOOGLE_MAPS_API_KEY);
 
 let mainWindow: BrowserWindow | null = null;
