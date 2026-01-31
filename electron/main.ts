@@ -65,15 +65,6 @@ ipcMain.handle('db:updateCompany', async (_event, id, updates) => {
     }
 });
 
-ipcMain.handle('db:deleteAllCompanies', async () => {
-    try {
-        const count = companyRepository.deleteAll();
-        return { success: true, deleted: count };
-    } catch (error) {
-        return { success: false, error: String(error) };
-    }
-});
-
 ipcMain.handle('scraper:start', async (_event, options) => {
     if (scrapingEngine) {
         return { success: false, error: 'Scraping already in progress' };

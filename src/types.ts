@@ -53,7 +53,6 @@ export interface IElectronAPI {
         getCompanies: (filters: CompanyFilters) => Promise<Company[]>;
         getCompany: (id: number) => Promise<Company | null>;
         updateCompany: (id: number, updates: Partial<Company>) => Promise<void>;
-        deleteAllCompanies: () => Promise<{ success: boolean; deleted?: number; error?: string }>;
     };
     ai: {
         analyze: (id: number) => Promise<{ success: boolean; data?: { summary: string; tags: string[] }; error?: string }>;

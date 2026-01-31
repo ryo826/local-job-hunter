@@ -281,12 +281,5 @@ export const companyRepository = {
         const database = getDb();
         const result = database.prepare('SELECT 1 FROM companies WHERE url = ?').get(url);
         return !!result;
-    },
-
-    deleteAll: (): number => {
-        const database = getDb();
-        const result = database.prepare('DELETE FROM companies').run();
-        console.log(`[Database] Deleted ${result.changes} companies`);
-        return result.changes;
     }
 };
