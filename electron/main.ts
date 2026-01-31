@@ -23,18 +23,30 @@ console.log('[Main] Loading .env from:', envPath);
 // Check if file exists and read content for debugging
 if (fs.existsSync(envPath)) {
     console.log('[Main] .env file exists');
-    const content = fs.readFileSync(envPath, 'utf-8');
+    let content = fs.readFileSync(envPath, 'utf-8');
+
+    // Remove BOM if present
+    if (content.charCodeAt(0) === 0xFEFF) {
+        content = content.slice(1);
+    }
+
+    // Normalize line endings (CRLF -> LF)
+    content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
     const lines = content.split('\n').filter(line => line.trim() && !line.startsWith('#'));
     console.log('[Main] .env non-comment lines:', lines.length);
 
     // Parse manually to avoid encoding issues
     for (const line of lines) {
+        console.log('[Main] Parsing line:', JSON.stringify(line));
         const match = line.match(/^([^=]+)=(.*)$/);
         if (match) {
             const key = match[1].trim();
             const value = match[2].trim();
             process.env[key] = value;
             console.log(`[Main] Set ${key}: ${value ? 'yes' : 'no'}`);
+        } else {
+            console.log('[Main] Line did not match pattern');
         }
     }
 } else {
