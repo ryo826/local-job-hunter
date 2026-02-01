@@ -5,9 +5,9 @@ import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
 const navigationItems = [
-    { label: 'ダッシュボード', href: '/', icon: Home },
-    { label: '検索', href: '/search', icon: Search },
-    { label: 'リスト', href: '/list', icon: Table2 },
+    { label: 'Dashboard', href: '/', icon: Home },
+    { label: 'Search', href: '/search', icon: Search },
+    { label: 'List', href: '/list', icon: Table2 },
 ];
 
 export function Sidebar() {
@@ -19,8 +19,7 @@ export function Sidebar() {
                     <Target className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                    <h1 className="text-base font-bold text-foreground">求人ハンター</h1>
-                    <p className="text-xs text-muted-foreground">Job Hunter Pro</p>
+                    <h1 className="text-base font-bold text-foreground">Job Hunter</h1>
                 </div>
             </div>
 
