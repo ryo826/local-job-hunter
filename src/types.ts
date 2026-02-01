@@ -59,6 +59,7 @@ export interface IElectronAPI {
         getCompanies: (filters: CompanyFilters) => Promise<Company[]>;
         getCompany: (id: number) => Promise<Company | null>;
         updateCompany: (id: number, updates: Partial<Company>) => Promise<void>;
+        deleteCompanies: (ids: number[]) => Promise<{ success: boolean; deleted?: number; error?: string }>;
         exportCsv: (options?: { ids?: number[] }) => Promise<{ success: boolean; error?: string; path?: string }>;
     };
     ai: {
