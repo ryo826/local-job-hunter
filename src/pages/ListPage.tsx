@@ -745,21 +745,21 @@ export function ListPage() {
 
             {/* Data Table */}
             <Card className="overflow-hidden rounded-2xl">
-                <div className="overflow-x-auto">
+                <div className="overflow-auto max-h-[calc(100vh-280px)]">
                     <table className="w-full text-sm">
-                        <thead className="bg-muted/50 border-b">
+                        <thead className="bg-muted/50 border-b sticky top-0 z-10">
                             <tr>
-                                <th className="p-3 w-10">
+                                <th className="p-3 w-10 bg-muted/50">
                                     <Checkbox
                                         checked={selectedRows.size === filteredCompanies.length && filteredCompanies.length > 0}
                                         onCheckedChange={toggleAllSelection}
                                     />
                                 </th>
-                                <th className="p-3 text-left font-medium w-[180px]">会社名</th>
-                                <th className="p-3 text-left font-medium w-[50px]">詳細</th>
-                                <th className="p-3 text-left font-medium w-[110px]">電話番号</th>
-                                <th className="p-3 text-left font-medium w-[80px]">HP</th>
-                                <th className="p-2 text-left font-medium w-[130px]">
+                                <th className="p-3 text-left font-medium w-[180px] bg-muted/50">会社名</th>
+                                <th className="p-3 text-left font-medium w-[50px] bg-muted/50">詳細</th>
+                                <th className="p-3 text-left font-medium w-[110px] bg-muted/50">電話番号</th>
+                                <th className="p-3 text-left font-medium w-[60px] bg-muted/50">HP</th>
+                                <th className="p-2 text-left font-medium w-[100px] bg-muted/50">
                                     <div className="space-y-1">
                                         <button
                                             className="flex items-center hover:text-primary transition-colors"
@@ -768,7 +768,7 @@ export function ListPage() {
                                             業種{getSortIcon('industry')}
                                         </button>
                                         <Select value={industryFilter} onValueChange={setIndustryFilter}>
-                                            <SelectTrigger className="h-7 text-xs w-full rounded-lg">
+                                            <SelectTrigger className="h-7 text-xs w-[90px] rounded-lg">
                                                 <SelectValue placeholder="全て" />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -780,7 +780,7 @@ export function ListPage() {
                                         </Select>
                                     </div>
                                 </th>
-                                <th className="p-2 text-left font-medium w-[90px]">
+                                <th className="p-2 text-left font-medium w-[100px] bg-muted/50">
                                     <div className="space-y-1">
                                         <button
                                             className="flex items-center hover:text-primary transition-colors"
@@ -789,7 +789,7 @@ export function ListPage() {
                                             エリア{getSortIcon('area')}
                                         </button>
                                         <Select value={areaFilter} onValueChange={setAreaFilter}>
-                                            <SelectTrigger className="h-7 text-xs w-full rounded-lg">
+                                            <SelectTrigger className="h-7 text-xs w-[90px] rounded-lg">
                                                 <SelectValue placeholder="全て" />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -801,7 +801,7 @@ export function ListPage() {
                                         </Select>
                                     </div>
                                 </th>
-                                <th className="p-2 text-left font-medium w-[100px]">
+                                <th className="p-2 text-left font-medium w-[100px] bg-muted/50">
                                     <div className="space-y-1">
                                         <button
                                             className="flex items-center hover:text-primary transition-colors"
@@ -810,7 +810,7 @@ export function ListPage() {
                                             給与{getSortIcon('salary')}
                                         </button>
                                         <Select value={salaryFilter} onValueChange={setSalaryFilter}>
-                                            <SelectTrigger className="h-7 text-xs w-full rounded-lg">
+                                            <SelectTrigger className="h-7 text-xs w-[90px] rounded-lg">
                                                 <SelectValue placeholder="全て" />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -822,7 +822,7 @@ export function ListPage() {
                                         </Select>
                                     </div>
                                 </th>
-                                <th className="p-2 text-left font-medium w-[90px]">
+                                <th className="p-2 text-left font-medium w-[100px] bg-muted/50">
                                     <div className="space-y-1">
                                         <button
                                             className="flex items-center hover:text-primary transition-colors"
@@ -831,7 +831,7 @@ export function ListPage() {
                                             規模{getSortIcon('employees')}
                                         </button>
                                         <Select value={employeesFilter} onValueChange={setEmployeesFilter}>
-                                            <SelectTrigger className="h-7 text-xs w-full rounded-lg">
+                                            <SelectTrigger className="h-7 text-xs w-[90px] rounded-lg">
                                                 <SelectValue placeholder="全て" />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -843,7 +843,7 @@ export function ListPage() {
                                         </Select>
                                     </div>
                                 </th>
-                                <th className="p-2 text-left font-medium w-[80px]">
+                                <th className="p-2 text-left font-medium w-[100px] bg-muted/50">
                                     <div className="space-y-1">
                                         <button
                                             className="flex items-center hover:text-primary transition-colors"
@@ -852,7 +852,7 @@ export function ListPage() {
                                             ソース{getSortIcon('source')}
                                         </button>
                                         <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                                            <SelectTrigger className="h-7 text-xs w-full rounded-lg">
+                                            <SelectTrigger className="h-7 text-xs w-[90px] rounded-lg">
                                                 <SelectValue placeholder="全て" />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -945,40 +945,40 @@ export function ListPage() {
                                             )}
                                         </td>
 
-                                        <td className="p-3">
+                                        <td className="p-3 w-[100px]">
                                             <span
-                                                className="text-muted-foreground truncate block max-w-[110px] text-xs"
+                                                className="text-muted-foreground truncate block max-w-[90px] text-xs"
                                                 title={formatted.fullIndustry}
                                             >
                                                 {formatted.industry}
                                             </span>
                                         </td>
 
-                                        <td className="p-3">
-                                            <span className="text-muted-foreground truncate block max-w-[70px] text-xs">
+                                        <td className="p-3 w-[100px]">
+                                            <span className="text-muted-foreground truncate block max-w-[90px] text-xs">
                                                 {formatted.area}
                                             </span>
                                         </td>
 
-                                        <td className="p-3">
+                                        <td className="p-3 w-[100px]">
                                             <span
-                                                className="text-green-600 dark:text-green-400 truncate block max-w-[80px] text-xs"
+                                                className="text-green-600 dark:text-green-400 truncate block max-w-[90px] text-xs"
                                                 title={formatted.fullSalary}
                                             >
                                                 {formatted.salary}
                                             </span>
                                         </td>
 
-                                        <td className="p-3">
+                                        <td className="p-3 w-[100px]">
                                             <span
-                                                className="text-muted-foreground truncate block max-w-[70px] text-xs"
+                                                className="text-muted-foreground truncate block max-w-[90px] text-xs"
                                                 title={formatted.fullScale}
                                             >
                                                 {formatted.scale}
                                             </span>
                                         </td>
 
-                                        <td className="p-3">
+                                        <td className="p-3 w-[100px]">
                                             {getSourceBadge(company.source)}
                                         </td>
 
