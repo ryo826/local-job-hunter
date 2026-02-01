@@ -507,7 +507,7 @@ export function ListPage() {
                 <div>
                     <h1 className="text-2xl font-bold text-foreground">Company List</h1>
                     <p className="text-sm text-muted-foreground mt-1">
-                        Showing {filteredCompanies.length} / {companies.length} total
+                        {filteredCompanies.length}件表示 / 全{companies.length}件
                         {enrichStats && (
                             <span className="ml-2 text-xs">
                                 (Phone: <span className="text-green-600 dark:text-green-400">{enrichStats.withPhone}</span> / None: {enrichStats.withoutPhone})

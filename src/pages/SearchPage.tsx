@@ -214,7 +214,6 @@ export function SearchPage() {
             {/* Header */}
             <div className="text-center mb-8">
                 <h1 className="text-2xl font-bold text-foreground">Scraping Settings</h1>
-                <p className="mt-2 text-muted-foreground">Collect company data from job sites</p>
             </div>
 
             {/* Progress Panel - Show when running */}
