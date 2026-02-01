@@ -962,7 +962,7 @@ export function ListPage() {
 
                                         <td className="p-3 w-[100px]">
                                             <span
-                                                className="text-green-600 dark:text-green-400 truncate block max-w-[90px] text-xs"
+                                                className="text-foreground truncate block max-w-[90px] text-xs"
                                                 title={formatted.fullSalary}
                                             >
                                                 {formatted.salary}
@@ -1059,110 +1059,133 @@ export function ListPage() {
                 </DialogContent>
             </Dialog>
 
-            {/* Detail Modal */}
-            <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
-                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto rounded-2xl">
-                    <DialogHeader>
-                        <DialogTitle className="text-xl">{detailCompany?.company_name}</DialogTitle>
-                        <DialogDescription className="flex items-center gap-2">
+            {/* Detail Slide Panel */}
+            <div
+                className={cn(
+                    'fixed left-64 right-0 bottom-0 h-1/2 bg-background border-t border-border shadow-2xl transition-transform duration-300 ease-out z-40',
+                    isDetailOpen ? 'translate-y-0' : 'translate-y-full'
+                )}
+            >
+                {/* Panel Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b bg-muted/30">
+                    <div>
+                        <h3 className="text-lg font-semibold">{detailCompany?.company_name}</h3>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
                             {detailCompany && getSourceBadge(detailCompany.source)} からスクレイピング
-                        </DialogDescription>
-                    </DialogHeader>
-
-                    {detailCompany && (
-                        <div className="space-y-6 pt-4">
-                            {/* 基本情報 */}
-                            <section className="p-4 rounded-xl bg-muted/50">
-                                <h4 className="font-semibold mb-3 flex items-center gap-2">
-                                    <Building2 className="h-4 w-4" />
-                                    基本情報
-                                </h4>
-                                <dl className="grid grid-cols-2 gap-3 text-sm">
-                                    <dt className="text-muted-foreground">代表者</dt>
-                                    <dd>{detailCompany.representative || '-'}</dd>
-                                    <dt className="text-muted-foreground">設立</dt>
-                                    <dd>{detailCompany.establishment || '-'}</dd>
-                                    <dt className="text-muted-foreground">従業員数</dt>
-                                    <dd>{detailCompany.employees || '-'}</dd>
-                                    <dt className="text-muted-foreground">売上高</dt>
-                                    <dd>{detailCompany.revenue || '-'}</dd>
-                                    <dt className="text-muted-foreground">所在地</dt>
-                                    <dd className="col-span-1">{detailCompany.address || '-'}</dd>
-                                </dl>
-                            </section>
-
-                            {/* 事業内容 */}
-                            <section className="p-4 rounded-xl bg-muted/50">
-                                <h4 className="font-semibold mb-3 flex items-center gap-2">
-                                    <Briefcase className="h-4 w-4" />
-                                    事業内容
-                                </h4>
-                                <p className="text-sm whitespace-pre-wrap">{detailCompany.industry || '-'}</p>
-                            </section>
-
-                            {/* 採用情報 */}
-                            <section className="p-4 rounded-xl bg-muted/50">
-                                <h4 className="font-semibold mb-3">採用情報</h4>
-                                <dl className="grid grid-cols-2 gap-3 text-sm">
-                                    <dt className="text-muted-foreground">職種</dt>
-                                    <dd>{detailCompany.job_title || '-'}</dd>
-                                    <dt className="text-muted-foreground">給与</dt>
-                                    <dd className="whitespace-pre-wrap">{detailCompany.salary_text || '-'}</dd>
-                                </dl>
-                            </section>
-
-                            {/* リンク */}
-                            <section>
-                                <h4 className="font-semibold mb-3">リンク</h4>
-                                <div className="flex flex-wrap gap-2">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="rounded-xl"
-                                        onClick={() => window.open(detailCompany.url, '_blank')}
-                                    >
-                                        <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-                                        求人ページ
-                                    </Button>
-                                    {detailCompany.homepage_url && (
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="rounded-xl"
-                                            onClick={() => window.open(detailCompany.homepage_url!, '_blank')}
-                                        >
-                                            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-                                            企業HP
-                                        </Button>
-                                    )}
-                                    {detailCompany.contact_form_url && (
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="rounded-xl"
-                                            onClick={() => window.open(detailCompany.contact_form_url!, '_blank')}
-                                        >
-                                            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-                                            問い合わせ
-                                        </Button>
-                                    )}
-                                </div>
-                            </section>
-
-                            {/* メモ */}
-                            <section>
-                                <h4 className="font-semibold mb-3">メモ</h4>
-                                <textarea
-                                    className="w-full p-3 border rounded-xl text-sm min-h-[100px] bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary"
-                                    placeholder="メモを入力..."
-                                    defaultValue={detailCompany.note || ''}
-                                    onBlur={(e) => updateCompany(detailCompany.id, { note: e.target.value })}
-                                />
-                            </section>
                         </div>
-                    )}
-                </DialogContent>
-            </Dialog>
+                    </div>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-xl"
+                        onClick={() => setIsDetailOpen(false)}
+                    >
+                        <X className="h-5 w-5" />
+                    </Button>
+                </div>
+
+                {/* Panel Content */}
+                {detailCompany && (
+                    <div className="overflow-y-auto h-[calc(100%-73px)] p-6">
+                        <div className="grid grid-cols-2 gap-6">
+                            {/* Left Column */}
+                            <div className="space-y-4">
+                                {/* 基本情報 */}
+                                <section className="p-4 rounded-xl bg-muted/50">
+                                    <h4 className="font-semibold mb-3 flex items-center gap-2">
+                                        <Building2 className="h-4 w-4" />
+                                        基本情報
+                                    </h4>
+                                    <dl className="grid grid-cols-2 gap-2 text-sm">
+                                        <dt className="text-muted-foreground">代表者</dt>
+                                        <dd>{detailCompany.representative || '-'}</dd>
+                                        <dt className="text-muted-foreground">設立</dt>
+                                        <dd>{detailCompany.establishment || '-'}</dd>
+                                        <dt className="text-muted-foreground">従業員数</dt>
+                                        <dd>{detailCompany.employees || '-'}</dd>
+                                        <dt className="text-muted-foreground">売上高</dt>
+                                        <dd>{detailCompany.revenue || '-'}</dd>
+                                        <dt className="text-muted-foreground">所在地</dt>
+                                        <dd>{detailCompany.address || '-'}</dd>
+                                    </dl>
+                                </section>
+
+                                {/* 事業内容 */}
+                                <section className="p-4 rounded-xl bg-muted/50">
+                                    <h4 className="font-semibold mb-3 flex items-center gap-2">
+                                        <Briefcase className="h-4 w-4" />
+                                        事業内容
+                                    </h4>
+                                    <p className="text-sm whitespace-pre-wrap">{detailCompany.industry || '-'}</p>
+                                </section>
+                            </div>
+
+                            {/* Right Column */}
+                            <div className="space-y-4">
+                                {/* 採用情報 */}
+                                <section className="p-4 rounded-xl bg-muted/50">
+                                    <h4 className="font-semibold mb-3">採用情報</h4>
+                                    <dl className="grid grid-cols-2 gap-2 text-sm">
+                                        <dt className="text-muted-foreground">職種</dt>
+                                        <dd>{detailCompany.job_title || '-'}</dd>
+                                        <dt className="text-muted-foreground">給与</dt>
+                                        <dd className="whitespace-pre-wrap">{detailCompany.salary_text || '-'}</dd>
+                                    </dl>
+                                </section>
+
+                                {/* リンク */}
+                                <section className="p-4 rounded-xl bg-muted/50">
+                                    <h4 className="font-semibold mb-3">リンク</h4>
+                                    <div className="flex flex-wrap gap-2">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="rounded-xl"
+                                            onClick={() => window.open(detailCompany.url, '_blank')}
+                                        >
+                                            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+                                            求人ページ
+                                        </Button>
+                                        {detailCompany.homepage_url && (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="rounded-xl"
+                                                onClick={() => window.open(detailCompany.homepage_url!, '_blank')}
+                                            >
+                                                <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+                                                企業HP
+                                            </Button>
+                                        )}
+                                        {detailCompany.contact_form_url && (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="rounded-xl"
+                                                onClick={() => window.open(detailCompany.contact_form_url!, '_blank')}
+                                            >
+                                                <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+                                                問い合わせ
+                                            </Button>
+                                        )}
+                                    </div>
+                                </section>
+
+                                {/* メモ */}
+                                <section className="p-4 rounded-xl bg-muted/50">
+                                    <h4 className="font-semibold mb-3">メモ</h4>
+                                    <textarea
+                                        className="w-full p-3 border rounded-xl text-sm min-h-[80px] bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="メモを入力..."
+                                        defaultValue={detailCompany.note || ''}
+                                        onBlur={(e) => updateCompany(detailCompany.id, { note: e.target.value })}
+                                    />
+                                </section>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
         </div>
     );
 }
