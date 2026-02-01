@@ -281,5 +281,18 @@ export const companyRepository = {
         const database = getDb();
         const result = database.prepare('SELECT 1 FROM companies WHERE url = ?').get(url);
         return !!result;
+    },
+
+    // 会社名で重複チェック（B2B営業用：同じ会社の複数求人を1つにまとめる）
+    existsByName: (companyName: string): boolean => {
+        const database = getDb();
+        const result = database.prepare('SELECT 1 FROM companies WHERE company_name = ?').get(companyName);
+        return !!result;
+    },
+
+    // 会社名で取得
+    getByName: (companyName: string): Company | null => {
+        const database = getDb();
+        return database.prepare('SELECT * FROM companies WHERE company_name = ?').get(companyName) as Company | null;
     }
 };

@@ -135,14 +135,35 @@ export class ScrapingEngine {
                         current++;
                         jobsFound++;
 
-                        const uniqueKey = company.url;
-                        const exists = companyRepository.exists(uniqueKey);
+                        // 会社名で重複チェック（B2B営業用：同じ会社の複数求人を1つにまとめる）
+                        const existsByName = companyRepository.existsByName(company.company_name);
 
-                        if (exists) {
+                        if (existsByName) {
                             duplicateCount++;
-                        } else {
-                            newCount++;
+                            log(`重複スキップ: ${company.company_name}`);
+                            // 進捗を更新して次へ
+                            const elapsedMs = Date.now() - scrapeStartTime;
+                            const avgTimePerJob = current > 0 ? elapsedMs / current : 10000;
+                            const remainingJobs = totalJobs ? Math.max(0, totalJobs - current) : 0;
+                            const estimatedMinutes = totalJobs
+                                ? Math.ceil((remainingJobs * avgTimePerJob) / 60000)
+                                : undefined;
+
+                            onProgress({
+                                current,
+                                total: totalJobs ?? current,
+                                newCount,
+                                duplicateCount,
+                                source: strategy.source,
+                                status: 'スクレイピング中...',
+                                totalJobs,
+                                estimatedMinutes,
+                                startTime: scrapeStartTime,
+                            });
+                            continue;
                         }
+
+                        newCount++;
 
                         // 既存: CompanyDataとして保存(B2B営業用)
                         companyRepository.safeUpsert(company as any);
@@ -159,8 +180,8 @@ export class ScrapingEngine {
                                     );
                                     if (phone) {
                                         company.phone = phone;
-                                        // URLで会社を検索してIDを取得し、電話番号を更新
-                                        const savedCompany = this.db.prepare('SELECT id FROM companies WHERE url = ?').get(company.url) as { id: number } | undefined;
+                                        // 会社名で検索してIDを取得し、電話番号を更新
+                                        const savedCompany = companyRepository.getByName(company.company_name);
                                         if (savedCompany) {
                                             companyRepository.update(savedCompany.id, { phone });
                                         }

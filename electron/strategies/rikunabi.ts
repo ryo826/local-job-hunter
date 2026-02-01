@@ -191,18 +191,47 @@ export class RikunabiStrategy implements ScrapingStrategy {
                 // 総件数を取得してコールバックで報告
                 if (onTotalCount) {
                     try {
-                        const countElement = page.locator('.styles_bodyText__KY7__').first();
-                        if (await countElement.count() > 0) {
-                            const text = await countElement.textContent();
-                            if (text) {
-                                const match = text.match(/([0-9,]+)/);
-                                if (match) {
-                                    const count = parseInt(match[1].replace(/,/g, ''), 10);
-                                    if (!isNaN(count)) {
-                                        log(`Total jobs: ${count}`);
-                                        onTotalCount(count);
+                        // 複数のセレクターを試行
+                        const countSelectors = [
+                            '.styles_bodyText__KY7__',
+                            '[class*="styles_bodyText"]',
+                            '[class*="searchCount"]',
+                            '.search-result-count',
+                        ];
+
+                        let found = false;
+                        for (const selector of countSelectors) {
+                            const countElement = page.locator(selector).first();
+                            if (await countElement.count() > 0) {
+                                const text = await countElement.textContent();
+                                log(`Count selector ${selector} found text: "${text}"`);
+                                if (text) {
+                                    const match = text.match(/([0-9,]+)/);
+                                    if (match) {
+                                        const count = parseInt(match[1].replace(/,/g, ''), 10);
+                                        if (!isNaN(count) && count > 0) {
+                                            log(`Total jobs: ${count}`);
+                                            onTotalCount(count);
+                                            found = true;
+                                            break;
+                                        }
                                     }
                                 }
+                            }
+                        }
+
+                        if (!found) {
+                            // ページ内のテキストから件数を探す
+                            const pageText = await page.evaluate(() => document.body.innerText);
+                            const match = pageText.match(/(\d{1,3}(?:,\d{3})*|\d+)\s*件/);
+                            if (match) {
+                                const num = parseInt(match[1].replace(/,/g, ''), 10);
+                                if (!isNaN(num) && num > 0) {
+                                    log(`Total jobs (from page text): ${num}`);
+                                    onTotalCount(num);
+                                }
+                            } else {
+                                log('Could not find total count on page');
                             }
                         }
                     } catch (e) {
