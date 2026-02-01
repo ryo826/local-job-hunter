@@ -189,15 +189,48 @@ export class MynaviStrategy implements ScrapingStrategy {
         // 総件数を取得してコールバックで報告
         if (onTotalCount) {
             try {
-                const countElement = page.locator('.js__searchRecruit--count').first();
-                if (await countElement.count() > 0) {
-                    const text = await countElement.textContent();
-                    if (text) {
-                        const num = parseInt(text.replace(/,/g, ''), 10);
-                        if (!isNaN(num)) {
-                            log(`Total jobs: ${num}`);
+                // 複数のセレクターを試行
+                const countSelectors = [
+                    '.js__searchRecruit--count',
+                    '.result__num',
+                    '.search__result__num',
+                    '[class*="searchResult"] [class*="num"]',
+                    '.countNum',
+                ];
+
+                let found = false;
+                for (const selector of countSelectors) {
+                    const countElement = page.locator(selector).first();
+                    if (await countElement.count() > 0) {
+                        const text = await countElement.textContent();
+                        log(`Count selector ${selector} found text: "${text}"`);
+                        if (text) {
+                            const match = text.match(/([0-9,]+)/);
+                            if (match) {
+                                const num = parseInt(match[1].replace(/,/g, ''), 10);
+                                if (!isNaN(num) && num > 0) {
+                                    log(`Total jobs: ${num}`);
+                                    onTotalCount(num);
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (!found) {
+                    // ページ内のテキストから件数を探す
+                    const pageText = await page.evaluate(() => document.body.innerText);
+                    const match = pageText.match(/(\d{1,3}(?:,\d{3})*|\d+)\s*件/);
+                    if (match) {
+                        const num = parseInt(match[1].replace(/,/g, ''), 10);
+                        if (!isNaN(num) && num > 0) {
+                            log(`Total jobs (from page text): ${num}`);
                             onTotalCount(num);
                         }
+                    } else {
+                        log('Could not find total count on page');
                     }
                 }
             } catch (e) {
