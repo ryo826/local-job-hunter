@@ -31,9 +31,14 @@ export interface ScrapingParams {
     jobTypes?: string[];     // 複数の職種カテゴリ
 }
 
+export interface ScrapingCallbacks {
+    onLog?: (message: string) => void;
+    onTotalCount?: (count: number) => void;  // 総件数を報告するコールバック
+}
+
 export interface ScrapingStrategy {
     readonly source: string;
     login?(page: Page): Promise<void>;
-    scrape(page: Page, params: ScrapingParams, onLog?: (message: string) => void): AsyncGenerator<CompanyData>;
+    scrape(page: Page, params: ScrapingParams, callbacks?: ScrapingCallbacks): AsyncGenerator<CompanyData>;
     getTotalJobCount?(page: Page, params: ScrapingParams): Promise<number | undefined>;
 }

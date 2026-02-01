@@ -1,5 +1,5 @@
 import { Page } from 'playwright';
-import { ScrapingStrategy, CompanyData, ScrapingParams } from './ScrapingStrategy';
+import { ScrapingStrategy, CompanyData, ScrapingParams, ScrapingCallbacks } from './ScrapingStrategy';
 import { normalizeIndustry, normalizeArea, normalizeSalary, normalizeEmployees } from '../utils/data-normalizer';
 
 // ランダム待機時間のヘルパー関数
@@ -113,8 +113,9 @@ export class RikunabiStrategy implements ScrapingStrategy {
     private readonly REQUEST_INTERVAL = 3000;  // 3秒
     private readonly PAGE_INTERVAL = 5000;     // 5秒
 
-    async *scrape(page: Page, params: ScrapingParams, onLog?: (message: string) => void): AsyncGenerator<CompanyData> {
+    async *scrape(page: Page, params: ScrapingParams, callbacks?: ScrapingCallbacks): AsyncGenerator<CompanyData> {
         const { keywords, prefectures, jobTypes } = params;
+        const { onLog, onTotalCount } = callbacks || {};
 
         const log = (msg: string) => {
             if (onLog) onLog(msg);
@@ -186,6 +187,28 @@ export class RikunabiStrategy implements ScrapingStrategy {
 
                 pageLoaded = true;
                 log('Page loaded successfully');
+
+                // 総件数を取得してコールバックで報告
+                if (onTotalCount) {
+                    try {
+                        const countElement = page.locator('.styles_bodyText__KY7__').first();
+                        if (await countElement.count() > 0) {
+                            const text = await countElement.textContent();
+                            if (text) {
+                                const match = text.match(/([0-9,]+)/);
+                                if (match) {
+                                    const count = parseInt(match[1].replace(/,/g, ''), 10);
+                                    if (!isNaN(count)) {
+                                        log(`Total jobs: ${count}`);
+                                        onTotalCount(count);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        log(`Failed to get total count: ${e}`);
+                    }
+                }
 
             } catch (error: any) {
                 retries--;

@@ -112,28 +112,25 @@ export class ScrapingEngine {
                 let totalJobs: number | undefined = undefined;
                 const scrapeStartTime = Date.now();
 
-                // 総求人件数を取得
-                if (strategy.getTotalJobCount) {
-                    onProgress({
-                        current: 0, total: 0, newCount: 0, duplicateCount: 0,
-                        source: strategy.source,
-                        status: '総件数を取得中...'
-                    });
-                    try {
-                        totalJobs = await strategy.getTotalJobCount(page, params);
-                        onLog?.(`[${strategy.source}] Total jobs found: ${totalJobs ?? 'unknown'}`);
-                    } catch (e) {
-                        onLog?.(`[${strategy.source}] Failed to get total job count: ${e}`);
-                    }
-                }
-
                 try {
                     const log = (msg: string) => {
                         console.log(`[${strategy.source}] ${msg}`);
                         onLog?.(`[${strategy.source}] ${msg}`);
                     };
 
-                    for await (const company of strategy.scrape(page, params, log)) {
+                    // 総件数コールバック - ページ読み込み後すぐに呼ばれる
+                    const onTotalCount = (count: number) => {
+                        totalJobs = count;
+                        onProgress({
+                            current: 0, total: count, newCount: 0, duplicateCount: 0,
+                            source: strategy.source,
+                            status: 'スクレイピング中...',
+                            totalJobs: count,
+                            startTime: scrapeStartTime,
+                        });
+                    };
+
+                    for await (const company of strategy.scrape(page, params, { onLog: log, onTotalCount })) {
                         if (this.shouldStop) break;
                         current++;
                         jobsFound++;
