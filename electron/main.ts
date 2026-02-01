@@ -136,6 +136,16 @@ ipcMain.handle('db:updateCompany', async (_event, id, updates) => {
     }
 });
 
+// 会社を削除（複数対応）
+ipcMain.handle('db:deleteCompanies', async (_event: any, ids: number[]) => {
+    try {
+        const deleted = companyRepository.deleteMany(ids);
+        return { success: true, deleted };
+    } catch (error) {
+        return { success: false, error: String(error) };
+    }
+});
+
 ipcMain.handle('db:exportCsv', async (_event, options) => {
     try {
         const exportService = getExportService();

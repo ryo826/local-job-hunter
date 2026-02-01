@@ -68,6 +68,8 @@ const electronAPI = {
             ipcRenderer.invoke('db:getCompany', id),
         updateCompany: (id: number, updates: Partial<Company>): Promise<{ success: boolean }> =>
             ipcRenderer.invoke('db:updateCompany', id, updates),
+        deleteCompanies: (ids: number[]): Promise<{ success: boolean; deleted?: number; error?: string }> =>
+            ipcRenderer.invoke('db:deleteCompanies', ids),
         exportCsv: (options?: { ids?: number[] }): Promise<{ success: boolean; error?: string; path?: string }> =>
             ipcRenderer.invoke('db:exportCsv', options),
     },

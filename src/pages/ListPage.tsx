@@ -17,7 +17,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { ExternalLink, Eye, Phone, Loader2, Download, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { ExternalLink, Eye, Phone, Loader2, Download, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, Trash2 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import type { Company } from '@/types';
 import { formatCompanyData } from '@/utils/companyFormatter';
@@ -82,6 +82,10 @@ export function ListPage() {
     const [isEnriching, setIsEnriching] = useState(false);
     const [enrichProgress, setEnrichProgress] = useState<{ current: number; total: number; companyName: string } | null>(null);
     const [enrichStats, setEnrichStats] = useState<{ withPhone: number; withoutPhone: number } | null>(null);
+
+    // Delete state
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     // Column filters
     const [industryFilter, setIndustryFilter] = useState<string>('all');
@@ -164,6 +168,30 @@ export function ListPage() {
             alert(`エラー: ${error}`);
         } finally {
             setIsExporting(false);
+        }
+    };
+
+    // Handle delete selected companies
+    const handleDelete = async () => {
+        if (isDeleting || selectedRows.size === 0) return;
+        setIsDeleting(true);
+
+        try {
+            const ids = Array.from(selectedRows);
+            const result = await window.electronAPI.db.deleteCompanies(ids);
+
+            if (result.success) {
+                setSelectedRows(new Set());
+                fetchCompanies();
+                loadEnrichStats();
+                setShowDeleteConfirm(false);
+            } else {
+                alert(`削除エラー: ${result.error}`);
+            }
+        } catch (error) {
+            alert(`エラー: ${error}`);
+        } finally {
+            setIsDeleting(false);
         }
     };
 
@@ -454,6 +482,22 @@ export function ListPage() {
                     </p>
                 </div>
                 <div className="flex gap-2">
+                    {/* Delete Button - only show when items selected */}
+                    {selectedRows.size > 0 && (
+                        <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => setShowDeleteConfirm(true)}
+                            disabled={isDeleting}
+                        >
+                            {isDeleting ? (
+                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                            ) : (
+                                <Trash2 className="h-4 w-4 mr-1" />
+                            )}
+                            削除 ({selectedRows.size})
+                        </Button>
+                    )}
                     <Button
                         variant="outline"
                         size="sm"
@@ -934,6 +978,42 @@ export function ListPage() {
                     </div>
                 ) : null}
             </Card>
+
+            {/* Delete Confirmation Dialog */}
+            <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>削除の確認</DialogTitle>
+                        <DialogDescription>
+                            選択した {selectedRows.size} 件の企業データを削除しますか？
+                            この操作は取り消せません。
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex justify-end gap-2 mt-4">
+                        <Button
+                            variant="outline"
+                            onClick={() => setShowDeleteConfirm(false)}
+                            disabled={isDeleting}
+                        >
+                            キャンセル
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            onClick={handleDelete}
+                            disabled={isDeleting}
+                        >
+                            {isDeleting ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                    削除中...
+                                </>
+                            ) : (
+                                '削除する'
+                            )}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             {/* Detail Modal */}
             <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>

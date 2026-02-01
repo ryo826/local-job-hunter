@@ -294,5 +294,28 @@ export const companyRepository = {
     getByName: (companyName: string): Company | null => {
         const database = getDb();
         return database.prepare('SELECT * FROM companies WHERE company_name = ?').get(companyName) as Company | null;
+    },
+
+    // 単一削除
+    delete: (id: number): boolean => {
+        const database = getDb();
+        const result = database.prepare('DELETE FROM companies WHERE id = ?').run(id);
+        return result.changes > 0;
+    },
+
+    // 複数削除
+    deleteMany: (ids: number[]): number => {
+        if (ids.length === 0) return 0;
+        const database = getDb();
+        const placeholders = ids.map(() => '?').join(',');
+        const result = database.prepare(`DELETE FROM companies WHERE id IN (${placeholders})`).run(...ids);
+        return result.changes;
+    },
+
+    // 全削除
+    deleteAll: (): number => {
+        const database = getDb();
+        const result = database.prepare('DELETE FROM companies').run();
+        return result.changes;
     }
 };
