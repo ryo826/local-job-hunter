@@ -505,12 +505,12 @@ export function ListPage() {
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold text-foreground">企業リスト</h1>
+                    <h1 className="text-2xl font-bold text-foreground">Company List</h1>
                     <p className="text-sm text-muted-foreground mt-1">
-                        {filteredCompanies.length} 件表示 / 全 {companies.length} 件
+                        Showing {filteredCompanies.length} / {companies.length} total
                         {enrichStats && (
                             <span className="ml-2 text-xs">
-                                (電話あり: <span className="text-green-600 dark:text-green-400">{enrichStats.withPhone}</span> / なし: {enrichStats.withoutPhone})
+                                (Phone: <span className="text-green-600 dark:text-green-400">{enrichStats.withPhone}</span> / None: {enrichStats.withoutPhone})
                             </span>
                         )}
                     </p>
@@ -530,7 +530,7 @@ export function ListPage() {
                             ) : (
                                 <Trash2 className="h-4 w-4 mr-1.5" />
                             )}
-                            削除 ({selectedRows.size})
+                            Delete ({selectedRows.size})
                         </Button>
                     )}
                     <Button
@@ -545,7 +545,7 @@ export function ListPage() {
                         ) : (
                             <Download className="h-4 w-4 mr-1.5" />
                         )}
-                        {selectedRows.size > 0 ? `エクスポート (${selectedRows.size})` : 'CSVエクスポート'}
+                        {selectedRows.size > 0 ? `Export (${selectedRows.size})` : 'Export CSV'}
                     </Button>
                     <Button
                         variant="default"
