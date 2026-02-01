@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -12,8 +11,9 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
-import { MapPin, Briefcase, ChevronRight, X } from 'lucide-react';
+import { MapPin, Briefcase, ChevronRight, X, Play, Square, Clock, TrendingUp, CheckCircle2 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
+import { cn } from '@/lib/utils';
 
 // 地方と都道府県のマッピング
 const regionPrefectures: Record<string, string[]> = {
@@ -46,6 +46,37 @@ const jobTypeCategories = [
     { id: 'education', name: '教育・保育', icon: '📚' },
     { id: 'other', name: 'その他', icon: '📋' },
 ];
+
+// サイト情報
+const siteInfo = {
+    mynavi: {
+        name: 'マイナビ転職',
+        color: 'bg-sky-500',
+        lightBg: 'bg-sky-50 dark:bg-sky-950',
+        border: 'border-sky-200 dark:border-sky-800',
+        text: 'text-sky-700 dark:text-sky-300',
+        selectedBg: 'bg-sky-100 dark:bg-sky-900',
+        selectedBorder: 'border-sky-500',
+    },
+    rikunabi: {
+        name: 'リクナビNEXT',
+        color: 'bg-emerald-500',
+        lightBg: 'bg-emerald-50 dark:bg-emerald-950',
+        border: 'border-emerald-200 dark:border-emerald-800',
+        text: 'text-emerald-700 dark:text-emerald-300',
+        selectedBg: 'bg-emerald-100 dark:bg-emerald-900',
+        selectedBorder: 'border-emerald-500',
+    },
+    doda: {
+        name: 'doda',
+        color: 'bg-orange-500',
+        lightBg: 'bg-orange-50 dark:bg-orange-950',
+        border: 'border-orange-200 dark:border-orange-800',
+        text: 'text-orange-700 dark:text-orange-300',
+        selectedBg: 'bg-orange-100 dark:bg-orange-900',
+        selectedBorder: 'border-orange-500',
+    },
+};
 
 export function SearchPage() {
     const { isScrapingRunning, scrapingProgress, startScraping, stopScraping } = useAppStore();
@@ -130,7 +161,7 @@ export function SearchPage() {
 
     // 選択された都道府県のサマリー
     const getLocationSummary = () => {
-        if (selectedPrefectures.size === 0) return '指定なし';
+        if (selectedPrefectures.size === 0) return '選択してください';
         if (selectedPrefectures.size <= 3) {
             return Array.from(selectedPrefectures).join(', ');
         }
@@ -139,7 +170,7 @@ export function SearchPage() {
 
     // 選択された職種のサマリー
     const getJobTypeSummary = () => {
-        if (selectedJobTypes.size === 0) return '指定なし';
+        if (selectedJobTypes.size === 0) return '選択してください';
         const selectedNames = jobTypeCategories
             .filter(cat => selectedJobTypes.has(cat.id))
             .map(cat => cat.name);
@@ -176,269 +207,331 @@ export function SearchPage() {
         ? Math.min(100, (scrapingProgress.current / Math.max(scrapingProgress.total, 1)) * 100)
         : 0;
 
+    const selectedSiteCount = Object.values(selectedSites).filter(Boolean).length;
+
     return (
-        <div className="space-y-8">
-            <div>
-                <h1 className="text-3xl font-bold">スクレイピング設定</h1>
-                <p className="mt-2 text-muted-foreground">求人サイトから企業情報を取得します</p>
+        <div className="max-w-3xl mx-auto space-y-6">
+            {/* Header */}
+            <div className="text-center mb-8">
+                <h1 className="text-2xl font-bold text-foreground">スクレイピング設定</h1>
+                <p className="mt-2 text-muted-foreground">求人サイトから企業情報を収集します</p>
             </div>
 
-            <div className="grid gap-8 lg:grid-cols-3">
-                <div className="space-y-6 lg:col-span-2">
-                    {/* Site Selection */}
-                    <Card className="p-6">
-                        <h2 className="mb-4 text-lg font-semibold">対象サイト</h2>
-                        <div className="space-y-3">
-                            <SiteCheckbox
-                                label="マイナビ転職"
-                                checked={selectedSites.mynavi}
-                                onChange={() => handleSiteChange('mynavi')}
-                                badgeColor="bg-blue-100 text-blue-900"
-                                badgeText="マイナビ"
-                            />
-                            <SiteCheckbox
-                                label="リクナビNEXT"
-                                checked={selectedSites.rikunabi}
-                                onChange={() => handleSiteChange('rikunabi')}
-                                badgeColor="bg-green-100 text-green-900"
-                                badgeText="リクナビ"
-                            />
-                            <SiteCheckbox
-                                label="doda"
-                                checked={selectedSites.doda}
-                                onChange={() => handleSiteChange('doda')}
-                                badgeColor="bg-orange-100 text-orange-900"
-                                badgeText="doda"
-                            />
+            {/* Progress Panel - Show when running */}
+            {isScrapingRunning && scrapingProgress && (
+                <Card className="p-6 rounded-2xl border-2 border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-lg font-semibold flex items-center gap-2">
+                                <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                                実行中...
+                            </h2>
+                            <Badge variant="secondary" className="rounded-xl">
+                                {scrapingProgress.source}
+                            </Badge>
                         </div>
-                    </Card>
 
-                    {/* Search Criteria */}
-                    <Card className="p-6">
-                        <h2 className="mb-4 text-lg font-semibold">検索条件</h2>
-                        <div className="space-y-4">
-                            {/* キーワード */}
-                            <div>
-                                <Label htmlFor="keyword">検索キーワード</Label>
-                                <Input
-                                    id="keyword"
-                                    placeholder="空欄の場合は新着全件を取得"
-                                    value={keyword}
-                                    onChange={(e) => setKeyword(e.target.value)}
-                                    className="mt-2"
-                                    disabled={isScrapingRunning}
-                                />
-                            </div>
-
-                            {/* 勤務地選択ボタン */}
-                            <div>
-                                <Label>勤務地</Label>
-                                <Button
-                                    variant="outline"
-                                    className="w-full mt-2 justify-between h-auto py-3"
-                                    onClick={() => setIsLocationModalOpen(true)}
-                                    disabled={isScrapingRunning}
-                                >
-                                    <div className="flex items-center gap-2">
-                                        <MapPin className="h-4 w-4 text-blue-600" />
-                                        <span className="text-left">{getLocationSummary()}</span>
-                                    </div>
-                                    <ChevronRight className="h-4 w-4" />
-                                </Button>
-                                {selectedPrefectures.size > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-2">
-                                        {Array.from(selectedPrefectures).slice(0, 5).map(pref => (
-                                            <Badge key={pref} variant="secondary" className="text-xs">
-                                                {pref}
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        togglePrefecture(pref);
-                                                    }}
-                                                    className="ml-1 hover:text-red-500"
-                                                >
-                                                    <X className="h-3 w-3" />
-                                                </button>
-                                            </Badge>
-                                        ))}
-                                        {selectedPrefectures.size > 5 && (
-                                            <Badge variant="outline" className="text-xs">
-                                                +{selectedPrefectures.size - 5}
-                                            </Badge>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* 職種選択ボタン */}
-                            <div>
-                                <Label>職種</Label>
-                                <Button
-                                    variant="outline"
-                                    className="w-full mt-2 justify-between h-auto py-3"
-                                    onClick={() => setIsJobTypeModalOpen(true)}
-                                    disabled={isScrapingRunning}
-                                >
-                                    <div className="flex items-center gap-2">
-                                        <Briefcase className="h-4 w-4 text-blue-600" />
-                                        <span className="text-left">{getJobTypeSummary()}</span>
-                                    </div>
-                                    <ChevronRight className="h-4 w-4" />
-                                </Button>
-                                {selectedJobTypes.size > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-2">
-                                        {jobTypeCategories
-                                            .filter(cat => selectedJobTypes.has(cat.id))
-                                            .slice(0, 3)
-                                            .map(cat => (
-                                                <Badge key={cat.id} variant="secondary" className="text-xs">
-                                                    {cat.icon} {cat.name}
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            toggleJobType(cat.id);
-                                                        }}
-                                                        className="ml-1 hover:text-red-500"
-                                                    >
-                                                        <X className="h-3 w-3" />
-                                                    </button>
-                                                </Badge>
-                                            ))}
-                                        {selectedJobTypes.size > 3 && (
-                                            <Badge variant="outline" className="text-xs">
-                                                +{selectedJobTypes.size - 3}
-                                            </Badge>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </Card>
-
-                    {/* Execution Control */}
-                    <Card className="p-6">
-                        <div className="space-y-4">
-                            {!isScrapingRunning ? (
-                                <Button
-                                    onClick={handleStartScraping}
-                                    className="w-full bg-blue-600 py-6 text-base font-semibold text-white hover:bg-blue-700"
-                                >
-                                    スクレイピング開始
-                                </Button>
-                            ) : (
-                                <Button
-                                    onClick={stopScraping}
-                                    variant="destructive"
-                                    className="w-full py-6 text-base font-semibold"
-                                >
-                                    停止
-                                </Button>
-                            )}
-                        </div>
-                    </Card>
-                </div>
-
-                {/* Progress Panel */}
-                {isScrapingRunning && scrapingProgress && (
-                    <Card className="sticky top-8 h-fit p-6">
-                        <h2 className="mb-4 text-lg font-semibold">実行中...</h2>
-                        <div className="space-y-4">
-                            {/* 総件数と時間情報 */}
-                            {scrapingProgress.totalJobs !== undefined && (
-                                <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
-                                    <p className="text-sm font-medium text-blue-800">
-                                        検索結果: <span className="text-lg">{scrapingProgress.totalJobs.toLocaleString()}</span>件
-                                    </p>
+                        {/* 総件数 */}
+                        {scrapingProgress.totalJobs !== undefined && (
+                            <div className="flex items-center gap-3 p-4 rounded-xl bg-card border">
+                                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                                    <TrendingUp className="h-5 w-5 text-primary" />
                                 </div>
-                            )}
+                                <div>
+                                    <p className="text-sm text-muted-foreground">検索結果</p>
+                                    <p className="text-2xl font-bold">{scrapingProgress.totalJobs.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">件</span></p>
+                                </div>
+                            </div>
+                        )}
 
-                            {/* 経過時間・残り時間 */}
-                            <ElapsedTime startTime={scrapingProgress.startTime} estimatedMinutes={scrapingProgress.estimatedMinutes} />
+                        {/* 経過時間 */}
+                        <ElapsedTime startTime={scrapingProgress.startTime} estimatedMinutes={scrapingProgress.estimatedMinutes} />
 
-                            <div>
-                                <div className="mb-2 flex items-center justify-between text-sm">
-                                    <span>進捗</span>
-                                    <span className="font-semibold">
-                                        {scrapingProgress.current} / {scrapingProgress.totalJobs ?? '?'} 件
-                                        ({Math.round(progressPercentage)}%)
+                        {/* Progress Bar */}
+                        <div>
+                            <div className="mb-2 flex items-center justify-between text-sm">
+                                <span className="text-muted-foreground">進捗</span>
+                                <span className="font-semibold">
+                                    {scrapingProgress.current} / {scrapingProgress.totalJobs ?? '?'} 件
+                                </span>
+                            </div>
+                            <Progress value={progressPercentage} className="h-3 rounded-xl" />
+                        </div>
+
+                        {/* Stats */}
+                        <div className="grid grid-cols-3 gap-3">
+                            <div className="p-3 rounded-xl bg-card border text-center">
+                                <p className="text-2xl font-bold text-foreground">{scrapingProgress.current}</p>
+                                <p className="text-xs text-muted-foreground">処理済</p>
+                            </div>
+                            <div className="p-3 rounded-xl bg-card border text-center">
+                                <p className="text-2xl font-bold text-green-600">{scrapingProgress.newCount}</p>
+                                <p className="text-xs text-muted-foreground">新規</p>
+                            </div>
+                            <div className="p-3 rounded-xl bg-card border text-center">
+                                <p className="text-2xl font-bold text-muted-foreground">{scrapingProgress.duplicateCount}</p>
+                                <p className="text-xs text-muted-foreground">重複</p>
+                            </div>
+                        </div>
+
+                        {/* Status */}
+                        <div className="text-sm text-muted-foreground text-center">
+                            {scrapingProgress.status}
+                        </div>
+                    </div>
+                </Card>
+            )}
+
+            {/* Target Sites */}
+            <Card className="p-6 rounded-2xl shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold">対象サイト</h2>
+                    <span className="text-sm text-muted-foreground">{selectedSiteCount} サイト選択中</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                    {(Object.keys(siteInfo) as Array<keyof typeof siteInfo>).map((site) => {
+                        const info = siteInfo[site];
+                        const isSelected = selectedSites[site];
+                        return (
+                            <button
+                                key={site}
+                                onClick={() => handleSiteChange(site)}
+                                disabled={isScrapingRunning}
+                                className={cn(
+                                    'relative p-4 rounded-xl border-2 transition-all',
+                                    'flex flex-col items-center gap-2',
+                                    'hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed',
+                                    isSelected
+                                        ? `${info.selectedBg} ${info.selectedBorder}`
+                                        : 'border-border hover:border-muted-foreground/30'
+                                )}
+                            >
+                                {isSelected && (
+                                    <div className="absolute top-2 right-2">
+                                        <CheckCircle2 className={cn('h-5 w-5', info.text)} />
+                                    </div>
+                                )}
+                                <div className={cn('h-10 w-10 rounded-xl flex items-center justify-center', info.color)}>
+                                    <span className="text-white font-bold text-sm">
+                                        {site === 'mynavi' ? 'M' : site === 'rikunabi' ? 'R' : 'D'}
                                     </span>
                                 </div>
-                                <Progress value={progressPercentage} className="h-2" />
-                            </div>
+                                <span className={cn('text-sm font-medium', isSelected ? info.text : 'text-foreground')}>
+                                    {info.name}
+                                </span>
+                            </button>
+                        );
+                    })}
+                </div>
+            </Card>
 
-                            <div className="space-y-2 rounded-lg bg-muted p-3 text-sm">
-                                <p>
-                                    <span className="font-medium">処理済: </span>
-                                    <span className="text-blue-600">{scrapingProgress.current}件</span>
-                                </p>
-                                <p>
-                                    <span className="font-medium">新規: </span>
-                                    <span className="text-green-600">{scrapingProgress.newCount}件</span>
-                                </p>
-                                <p>
-                                    <span className="font-medium">重複: </span>
-                                    <span className="text-gray-600">{scrapingProgress.duplicateCount}件</span>
-                                </p>
-                            </div>
+            {/* Search Conditions */}
+            <Card className="p-6 rounded-2xl shadow-sm">
+                <h2 className="text-lg font-semibold mb-4">検索条件</h2>
+                <div className="space-y-4">
+                    {/* キーワード */}
+                    <div>
+                        <label className="text-sm font-medium text-foreground mb-2 block">
+                            キーワード
+                        </label>
+                        <Input
+                            placeholder="検索キーワードを入力（空欄で新着全件取得）"
+                            value={keyword}
+                            onChange={(e) => setKeyword(e.target.value)}
+                            className="h-12 rounded-xl text-base"
+                            disabled={isScrapingRunning}
+                        />
+                    </div>
 
-                            <div className="rounded-lg bg-muted p-3">
-                                <p className="text-sm">
-                                    <span className="font-medium">ソース: </span>
-                                    <span>{scrapingProgress.source}</span>
-                                </p>
-                                <p className="text-sm">
-                                    <span className="font-medium">状態: </span>
-                                    <span>{scrapingProgress.status}</span>
-                                </p>
+                    {/* 勤務地選択ボタン */}
+                    <div>
+                        <label className="text-sm font-medium text-foreground mb-2 block">
+                            勤務地
+                        </label>
+                        <Button
+                            variant="outline"
+                            className={cn(
+                                'w-full h-12 rounded-xl justify-between',
+                                selectedPrefectures.size > 0 && 'border-primary bg-primary/5'
+                            )}
+                            onClick={() => setIsLocationModalOpen(true)}
+                            disabled={isScrapingRunning}
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className="h-8 w-8 rounded-lg bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
+                                    <MapPin className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                                </div>
+                                <span className={cn(
+                                    'text-left',
+                                    selectedPrefectures.size === 0 && 'text-muted-foreground'
+                                )}>
+                                    {getLocationSummary()}
+                                </span>
                             </div>
-                        </div>
-                    </Card>
+                            <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                        </Button>
+                        {selectedPrefectures.size > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-3">
+                                {Array.from(selectedPrefectures).slice(0, 5).map(pref => (
+                                    <Badge
+                                        key={pref}
+                                        variant="secondary"
+                                        className="rounded-lg px-2 py-1 text-xs"
+                                    >
+                                        {pref}
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                togglePrefecture(pref);
+                                            }}
+                                            className="ml-1.5 hover:text-destructive"
+                                        >
+                                            <X className="h-3 w-3" />
+                                        </button>
+                                    </Badge>
+                                ))}
+                                {selectedPrefectures.size > 5 && (
+                                    <Badge variant="outline" className="rounded-lg text-xs">
+                                        +{selectedPrefectures.size - 5}
+                                    </Badge>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* 職種選択ボタン */}
+                    <div>
+                        <label className="text-sm font-medium text-foreground mb-2 block">
+                            職種
+                        </label>
+                        <Button
+                            variant="outline"
+                            className={cn(
+                                'w-full h-12 rounded-xl justify-between',
+                                selectedJobTypes.size > 0 && 'border-primary bg-primary/5'
+                            )}
+                            onClick={() => setIsJobTypeModalOpen(true)}
+                            disabled={isScrapingRunning}
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className="h-8 w-8 rounded-lg bg-purple-100 dark:bg-purple-900 flex items-center justify-center">
+                                    <Briefcase className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+                                </div>
+                                <span className={cn(
+                                    'text-left',
+                                    selectedJobTypes.size === 0 && 'text-muted-foreground'
+                                )}>
+                                    {getJobTypeSummary()}
+                                </span>
+                            </div>
+                            <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                        </Button>
+                        {selectedJobTypes.size > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-3">
+                                {jobTypeCategories
+                                    .filter(cat => selectedJobTypes.has(cat.id))
+                                    .slice(0, 3)
+                                    .map(cat => (
+                                        <Badge
+                                            key={cat.id}
+                                            variant="secondary"
+                                            className="rounded-lg px-2 py-1 text-xs"
+                                        >
+                                            {cat.icon} {cat.name}
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    toggleJobType(cat.id);
+                                                }}
+                                                className="ml-1.5 hover:text-destructive"
+                                            >
+                                                <X className="h-3 w-3" />
+                                            </button>
+                                        </Badge>
+                                    ))}
+                                {selectedJobTypes.size > 3 && (
+                                    <Badge variant="outline" className="rounded-lg text-xs">
+                                        +{selectedJobTypes.size - 3}
+                                    </Badge>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </Card>
+
+            {/* Action Button */}
+            <div className="pt-2">
+                {!isScrapingRunning ? (
+                    <Button
+                        onClick={handleStartScraping}
+                        className="w-full h-14 rounded-xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg hover:shadow-xl transition-all"
+                        disabled={selectedSiteCount === 0}
+                    >
+                        <Play className="h-5 w-5 mr-2" />
+                        スクレイピング開始
+                    </Button>
+                ) : (
+                    <Button
+                        onClick={stopScraping}
+                        variant="destructive"
+                        className="w-full h-14 rounded-xl text-lg font-bold shadow-lg"
+                    >
+                        <Square className="h-5 w-5 mr-2" />
+                        停止
+                    </Button>
                 )}
             </div>
 
             {/* 勤務地選択モーダル */}
             <Dialog open={isLocationModalOpen} onOpenChange={setIsLocationModalOpen}>
-                <DialogContent className="max-w-3xl max-h-[80vh]">
+                <DialogContent className="max-w-3xl max-h-[80vh] rounded-2xl">
                     <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <MapPin className="h-5 w-5 text-blue-600" />
+                        <DialogTitle className="flex items-center gap-3 text-xl">
+                            <div className="h-10 w-10 rounded-xl bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
+                                <MapPin className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                            </div>
                             勤務地を選択
                         </DialogTitle>
                     </DialogHeader>
-                    <div className="flex gap-4 mt-4">
+                    <div className="flex gap-6 mt-4">
                         {/* 地方タブ（左側） */}
-                        <div className="w-32 space-y-1 border-r pr-4">
+                        <div className="w-36 space-y-1">
                             {regions.map(region => {
                                 const prefectures = regionPrefectures[region];
                                 const selectedCount = prefectures.filter(p => selectedPrefectures.has(p)).length;
                                 return (
                                     <button
                                         key={region}
-                                        className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
+                                        className={cn(
+                                            'w-full text-left px-4 py-2.5 rounded-xl text-sm transition-all',
                                             activeRegion === region
-                                                ? 'bg-blue-100 text-blue-700 font-medium'
-                                                : 'hover:bg-gray-100'
-                                        }`}
+                                                ? 'bg-primary/10 text-primary font-medium'
+                                                : 'hover:bg-muted text-muted-foreground hover:text-foreground'
+                                        )}
                                         onClick={() => setActiveRegion(region)}
                                     >
-                                        {region}
-                                        {selectedCount > 0 && (
-                                            <span className="ml-1 text-xs bg-blue-500 text-white px-1.5 py-0.5 rounded-full">
-                                                {selectedCount}
-                                            </span>
-                                        )}
+                                        <span className="flex items-center justify-between">
+                                            {region}
+                                            {selectedCount > 0 && (
+                                                <span className="text-xs bg-primary text-primary-foreground px-1.5 py-0.5 rounded-full">
+                                                    {selectedCount}
+                                                </span>
+                                            )}
+                                        </span>
                                     </button>
                                 );
                             })}
                         </div>
 
                         {/* 都道府県チェックボックス（右側） */}
-                        <div className="flex-1">
-                            <div className="mb-3 flex items-center justify-between">
-                                <span className="font-medium">{activeRegion}</span>
+                        <div className="flex-1 border-l pl-6">
+                            <div className="mb-4 flex items-center justify-between">
+                                <span className="font-semibold text-lg">{activeRegion}</span>
                                 <Button
                                     variant="ghost"
                                     size="sm"
+                                    className="rounded-lg"
                                     onClick={() => toggleRegion(activeRegion)}
                                 >
                                     {regionPrefectures[activeRegion].every(p => selectedPrefectures.has(p))
@@ -450,7 +543,12 @@ export function SearchPage() {
                                 {regionPrefectures[activeRegion].map(prefecture => (
                                     <label
                                         key={prefecture}
-                                        className="flex items-center gap-2 p-2 rounded border cursor-pointer hover:bg-gray-50 transition-colors"
+                                        className={cn(
+                                            'flex items-center gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all',
+                                            selectedPrefectures.has(prefecture)
+                                                ? 'border-primary bg-primary/5'
+                                                : 'border-border hover:border-muted-foreground/30 hover:bg-muted/50'
+                                        )}
                                     >
                                         <Checkbox
                                             checked={selectedPrefectures.has(prefecture)}
@@ -465,24 +563,25 @@ export function SearchPage() {
 
                     {/* 選択済み表示 */}
                     {selectedPrefectures.size > 0 && (
-                        <div className="mt-4 pt-4 border-t">
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm font-medium">選択中: {selectedPrefectures.size}件</span>
+                        <div className="mt-6 pt-4 border-t">
+                            <div className="flex items-center justify-between mb-3">
+                                <span className="text-sm font-medium">{selectedPrefectures.size}件選択中</span>
                                 <Button
                                     variant="ghost"
                                     size="sm"
+                                    className="rounded-lg text-destructive hover:text-destructive"
                                     onClick={() => setSelectedPrefectures(new Set())}
                                 >
                                     すべてクリア
                                 </Button>
                             </div>
-                            <div className="flex flex-wrap gap-1">
+                            <div className="flex flex-wrap gap-1.5">
                                 {Array.from(selectedPrefectures).map(pref => (
-                                    <Badge key={pref} variant="secondary" className="text-xs">
+                                    <Badge key={pref} variant="secondary" className="rounded-lg">
                                         {pref}
                                         <button
                                             onClick={() => togglePrefecture(pref)}
-                                            className="ml-1 hover:text-red-500"
+                                            className="ml-1.5 hover:text-destructive"
                                         >
                                             <X className="h-3 w-3" />
                                         </button>
@@ -492,9 +591,12 @@ export function SearchPage() {
                         </div>
                     )}
 
-                    <div className="mt-4 flex justify-end">
-                        <Button onClick={() => setIsLocationModalOpen(false)}>
-                            完了
+                    <div className="mt-6 flex justify-end gap-3">
+                        <Button variant="outline" className="rounded-xl" onClick={() => setIsLocationModalOpen(false)}>
+                            キャンセル
+                        </Button>
+                        <Button className="rounded-xl" onClick={() => setIsLocationModalOpen(false)}>
+                            適用
                         </Button>
                     </div>
                 </DialogContent>
@@ -502,10 +604,12 @@ export function SearchPage() {
 
             {/* 職種選択モーダル */}
             <Dialog open={isJobTypeModalOpen} onOpenChange={setIsJobTypeModalOpen}>
-                <DialogContent className="max-w-2xl max-h-[80vh]">
+                <DialogContent className="max-w-2xl max-h-[80vh] rounded-2xl">
                     <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <Briefcase className="h-5 w-5 text-blue-600" />
+                        <DialogTitle className="flex items-center gap-3 text-xl">
+                            <div className="h-10 w-10 rounded-xl bg-purple-100 dark:bg-purple-900 flex items-center justify-center">
+                                <Briefcase className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                            </div>
                             職種を選択
                         </DialogTitle>
                     </DialogHeader>
@@ -514,18 +618,19 @@ export function SearchPage() {
                             {jobTypeCategories.map(category => (
                                 <label
                                     key={category.id}
-                                    className={`flex items-center gap-3 p-4 rounded-lg border-2 cursor-pointer transition-all ${
+                                    className={cn(
+                                        'flex items-center gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all',
                                         selectedJobTypes.has(category.id)
-                                            ? 'border-blue-500 bg-blue-50'
-                                            : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                                    }`}
+                                            ? 'border-primary bg-primary/5'
+                                            : 'border-border hover:border-muted-foreground/30 hover:bg-muted/50'
+                                    )}
                                 >
                                     <Checkbox
                                         checked={selectedJobTypes.has(category.id)}
                                         onCheckedChange={() => toggleJobType(category.id)}
                                     />
-                                    <span className="text-xl">{category.icon}</span>
-                                    <span className="text-sm font-medium">{category.name}</span>
+                                    <span className="text-2xl">{category.icon}</span>
+                                    <span className="text-sm font-medium flex-1">{category.name}</span>
                                 </label>
                             ))}
                         </div>
@@ -533,12 +638,13 @@ export function SearchPage() {
 
                     {/* 選択済み表示 */}
                     {selectedJobTypes.size > 0 && (
-                        <div className="mt-4 pt-4 border-t">
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm font-medium">選択中: {selectedJobTypes.size}件</span>
+                        <div className="mt-6 pt-4 border-t">
+                            <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium">{selectedJobTypes.size}件選択中</span>
                                 <Button
                                     variant="ghost"
                                     size="sm"
+                                    className="rounded-lg text-destructive hover:text-destructive"
                                     onClick={() => setSelectedJobTypes(new Set())}
                                 >
                                     すべてクリア
@@ -547,40 +653,16 @@ export function SearchPage() {
                         </div>
                     )}
 
-                    <div className="mt-4 flex justify-end">
-                        <Button onClick={() => setIsJobTypeModalOpen(false)}>
-                            完了
+                    <div className="mt-6 flex justify-end gap-3">
+                        <Button variant="outline" className="rounded-xl" onClick={() => setIsJobTypeModalOpen(false)}>
+                            キャンセル
+                        </Button>
+                        <Button className="rounded-xl" onClick={() => setIsJobTypeModalOpen(false)}>
+                            適用
                         </Button>
                     </div>
                 </DialogContent>
             </Dialog>
-        </div>
-    );
-}
-
-function SiteCheckbox({
-    label,
-    checked,
-    onChange,
-    badgeColor,
-    badgeText,
-    requiresLogin,
-}: {
-    label: string;
-    checked: boolean;
-    onChange: () => void;
-    badgeColor: string;
-    badgeText: string;
-    requiresLogin?: boolean;
-}) {
-    return (
-        <div className="flex items-center gap-3">
-            <Checkbox checked={checked} onCheckedChange={onChange} />
-            <span className="flex-1">{label}</span>
-            <Badge className={`${badgeColor} border-0`}>{badgeText}</Badge>
-            {requiresLogin && (
-                <span className="text-xs text-yellow-600">🔒</span>
-            )}
         </div>
     );
 }
@@ -611,10 +693,14 @@ function ElapsedTime({ startTime, estimatedMinutes }: { startTime?: number; esti
     };
 
     return (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-            <span>経過時間: {formatTime(elapsed)}</span>
+        <div className="flex items-center justify-between p-3 rounded-xl bg-card border">
+            <div className="flex items-center gap-2 text-sm">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                <span className="text-muted-foreground">経過時間:</span>
+                <span className="font-mono font-semibold">{formatTime(elapsed)}</span>
+            </div>
             {estimatedMinutes !== undefined && estimatedMinutes > 0 && (
-                <span>残り約 {estimatedMinutes} 分</span>
+                <span className="text-sm text-muted-foreground">残り約 {estimatedMinutes} 分</span>
             )}
         </div>
     );

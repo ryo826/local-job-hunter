@@ -3,6 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 import {
     Dialog,
     DialogContent,
@@ -17,17 +18,37 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { ExternalLink, Eye, Phone, Loader2, Download, ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown, Trash2 } from 'lucide-react';
+import {
+    ExternalLink,
+    Eye,
+    Phone,
+    Loader2,
+    Download,
+    ChevronDown,
+    ChevronUp,
+    ArrowUpDown,
+    ArrowUp,
+    ArrowDown,
+    Trash2,
+    Search,
+    Filter,
+    RefreshCw,
+    Building2,
+    MapPin,
+    Briefcase,
+    X,
+} from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import type { Company } from '@/types';
 import { formatCompanyData } from '@/utils/companyFormatter';
+import { cn } from '@/lib/utils';
 
 // Sort types
 type SortColumn = 'industry' | 'area' | 'salary' | 'employees' | 'source' | null;
 type SortDirection = 'asc' | 'desc';
 
 // Filter tab options
-type FilterTab = '勤務地' | '職種' | 'こだわり条件' | '雇用形態' | '年収';
+type FilterTab = '勤務地' | '職種';
 
 // Region checkbox options
 const regionCheckboxOptions = [
@@ -35,7 +56,7 @@ const regionCheckboxOptions = [
     '東海', '関西', '中国', '四国', '九州・沖縄'
 ];
 
-// Job type checkbox options (based on screenshot)
+// Job type checkbox options
 const jobTypeCheckboxOptions = [
     '営業・販売',
     '経営・事業企画・人事・事務',
@@ -47,7 +68,6 @@ const jobTypeCheckboxOptions = [
     '物流・運輸・運転',
     'その他'
 ];
-
 
 // Map prefectures to regions
 const prefectureToRegion: Record<string, string> = {
@@ -64,6 +84,25 @@ const prefectureToRegion: Record<string, string> = {
     '大分県': '九州・沖縄', '宮崎県': '九州・沖縄', '鹿児島県': '九州・沖縄', '沖縄県': '九州・沖縄',
 };
 
+// Source badge config
+const sourceConfig: Record<string, { label: string; className: string }> = {
+    mynavi: { label: 'マイナビ', className: 'bg-sky-100 text-sky-700 dark:bg-sky-900 dark:text-sky-300' },
+    rikunabi: { label: 'リクナビ', className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300' },
+    doda: { label: 'doda', className: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300' },
+};
+
+// Status badge config
+const statusConfig: Record<string, { label: string; className: string }> = {
+    new: { label: '新規', className: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' },
+    unreachable: { label: '不通', className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300' },
+    promising: { label: '見込み', className: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300' },
+    keyman: { label: 'キーマン', className: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300' },
+    meeting: { label: '商談中', className: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300' },
+    won: { label: '成約', className: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' },
+    lost: { label: '失注', className: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300' },
+    ng: { label: 'NG', className: 'bg-red-200 text-red-800 dark:bg-red-950 dark:text-red-300' },
+};
+
 export function ListPage() {
     const { companies, filters, setFilters, fetchCompanies, updateCompany } = useAppStore();
 
@@ -76,7 +115,7 @@ export function ListPage() {
     const [isDetailOpen, setIsDetailOpen] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
     const [activeFilterTab, setActiveFilterTab] = useState<FilterTab>('勤務地');
-    const [isFilterExpanded, setIsFilterExpanded] = useState(true);
+    const [isFilterExpanded, setIsFilterExpanded] = useState(false);
 
     // Phone enrichment state
     const [isEnriching, setIsEnriching] = useState(false);
@@ -228,7 +267,6 @@ export function ListPage() {
 
         companies.forEach(company => {
             if (company.industry) {
-                // 業種は最初の20文字程度で区切る
                 const shortIndustry = company.industry.substring(0, 20);
                 industries.add(shortIndustry);
             }
@@ -287,10 +325,10 @@ export function ListPage() {
         }
     };
 
-    // Filter companies by region, job type, and column filters (client-side filtering)
+    // Filter companies
     const filteredCompanies = useMemo(() => {
         let result = companies.filter(company => {
-            // Region filter (if any regions selected)
+            // Region filter
             if (selectedRegions.size > 0) {
                 const companyRegion = company.area ? prefectureToRegion[company.area] : null;
                 if (!companyRegion || !selectedRegions.has(companyRegion)) {
@@ -298,7 +336,7 @@ export function ListPage() {
                 }
             }
 
-            // Job type filter (if any job types selected)
+            // Job type filter
             if (selectedJobTypes.size > 0) {
                 const jobTitle = company.job_title?.toLowerCase() || '';
                 const industry = company.industry?.toLowerCase() || '';
@@ -397,11 +435,11 @@ export function ListPage() {
     // Get sort icon for column
     const getSortIcon = (column: SortColumn) => {
         if (sortColumn !== column) {
-            return <ArrowUpDown className="h-3 w-3 ml-1 opacity-50" />;
+            return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />;
         }
         return sortDirection === 'asc'
-            ? <ArrowUp className="h-3 w-3 ml-1 text-blue-600" />
-            : <ArrowDown className="h-3 w-3 ml-1 text-blue-600" />;
+            ? <ArrowUp className="h-3 w-3 ml-1 text-primary" />
+            : <ArrowDown className="h-3 w-3 ml-1 text-primary" />;
     };
 
     const toggleRowSelection = (id: number) => {
@@ -425,27 +463,21 @@ export function ListPage() {
     };
 
     const getSourceBadge = (source: string) => {
-        const sourceMap: Record<string, { label: string; className: string }> = {
-            mynavi: { label: 'マイナビ', className: 'bg-blue-600 text-white' },
-            rikunabi: { label: 'リクナビ', className: 'bg-green-600 text-white' },
-            doda: { label: 'doda', className: 'bg-orange-500 text-white' },
-        };
-        const config = sourceMap[source] || { label: source, className: 'bg-gray-500 text-white' };
-        return <span className={`px-1.5 py-0.5 rounded text-[10px] ${config.className}`}>{config.label}</span>;
+        const config = sourceConfig[source] || { label: source, className: 'bg-slate-100 text-slate-700' };
+        return (
+            <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', config.className)}>
+                {config.label}
+            </span>
+        );
     };
 
-    const getStatusColor = (status: string) => {
-        const colorMap: Record<string, string> = {
-            new: 'bg-gray-500',
-            unreachable: 'bg-yellow-500',
-            promising: 'bg-blue-500',
-            keyman: 'bg-purple-500',
-            meeting: 'bg-indigo-500',
-            won: 'bg-green-500',
-            lost: 'bg-red-500',
-            ng: 'bg-red-700',
-        };
-        return colorMap[status] || 'bg-gray-500';
+    const getStatusBadge = (status: string) => {
+        const config = statusConfig[status] || { label: status, className: 'bg-slate-100 text-slate-700' };
+        return (
+            <span className={cn('px-3 py-1 rounded-full text-xs font-medium', config.className)}>
+                {config.label}
+            </span>
+        );
     };
 
     const handleStatusChange = async (id: number, newStatus: string) => {
@@ -461,39 +493,42 @@ export function ListPage() {
         }
     };
 
+    const activeFiltersCount = selectedRegions.size + selectedJobTypes.size +
+        (industryFilter !== 'all' ? 1 : 0) +
+        (areaFilter !== 'all' ? 1 : 0) +
+        (salaryFilter !== 'all' ? 1 : 0) +
+        (employeesFilter !== 'all' ? 1 : 0) +
+        (sourceFilter !== 'all' ? 1 : 0);
+
     return (
-        <div className="space-y-4 p-4">
+        <div className="space-y-4">
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-xl font-bold">企業リスト</h1>
-                    <p className="text-sm text-muted-foreground">
+                    <h1 className="text-2xl font-bold text-foreground">企業リスト</h1>
+                    <p className="text-sm text-muted-foreground mt-1">
                         {filteredCompanies.length} 件表示 / 全 {companies.length} 件
                         {enrichStats && (
-                            <span className="ml-2">
-                                (電話あり: {enrichStats.withPhone} / なし: {enrichStats.withoutPhone})
-                            </span>
-                        )}
-                        {selectedRows.size > 0 && (
-                            <span className="ml-2 text-blue-600">
-                                ({selectedRows.size} 件選択中)
+                            <span className="ml-2 text-xs">
+                                (電話あり: <span className="text-green-600 dark:text-green-400">{enrichStats.withPhone}</span> / なし: {enrichStats.withoutPhone})
                             </span>
                         )}
                     </p>
                 </div>
-                <div className="flex gap-2">
-                    {/* Delete Button - only show when items selected */}
+                <div className="flex items-center gap-2">
+                    {/* Delete Button */}
                     {selectedRows.size > 0 && (
                         <Button
                             variant="destructive"
                             size="sm"
+                            className="rounded-xl"
                             onClick={() => setShowDeleteConfirm(true)}
                             disabled={isDeleting}
                         >
                             {isDeleting ? (
-                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
                             ) : (
-                                <Trash2 className="h-4 w-4 mr-1" />
+                                <Trash2 className="h-4 w-4 mr-1.5" />
                             )}
                             削除 ({selectedRows.size})
                         </Button>
@@ -501,51 +536,60 @@ export function ListPage() {
                     <Button
                         variant="outline"
                         size="sm"
+                        className="rounded-xl"
                         onClick={handleExport}
                         disabled={isExporting || companies.length === 0}
                     >
                         {isExporting ? (
-                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                            <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
                         ) : (
-                            <Download className="h-4 w-4 mr-1" />
+                            <Download className="h-4 w-4 mr-1.5" />
                         )}
-                        {selectedRows.size > 0 ? `選択をエクスポート (${selectedRows.size})` : 'CSVエクスポート'}
+                        {selectedRows.size > 0 ? `エクスポート (${selectedRows.size})` : 'CSVエクスポート'}
                     </Button>
                     <Button
                         variant="default"
                         size="sm"
+                        className="rounded-xl bg-green-600 hover:bg-green-700"
                         onClick={handlePhoneLookup}
                         disabled={isEnriching || (enrichStats?.withoutPhone === 0)}
-                        className="bg-green-600 hover:bg-green-700"
                     >
                         {isEnriching ? (
                             <>
-                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
                                 {enrichProgress ? `${enrichProgress.current}/${enrichProgress.total}` : '準備中...'}
                             </>
                         ) : (
                             <>
-                                <Phone className="h-4 w-4 mr-1" />
+                                <Phone className="h-4 w-4 mr-1.5" />
                                 電話番号取得
                             </>
                         )}
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => fetchCompanies()}>
-                        更新
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-xl"
+                        onClick={() => fetchCompanies()}
+                    >
+                        <RefreshCw className="h-4 w-4" />
                     </Button>
                 </div>
             </div>
 
-            {/* Basic Search and Status Filter */}
-            <div className="flex flex-wrap gap-2">
-                <Input
-                    className="flex-1 min-w-[200px] h-8 text-sm"
-                    placeholder="会社名・住所・メモで検索..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                />
+            {/* Search and Filter Bar */}
+            <div className="flex items-center gap-3">
+                <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                        className="pl-10 h-11 rounded-xl"
+                        placeholder="会社名・住所・メモで検索..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                </div>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-28 h-8 text-sm">
+                    <SelectTrigger className="w-32 h-11 rounded-xl">
                         <SelectValue placeholder="ステータス" />
                     </SelectTrigger>
                     <SelectContent>
@@ -558,41 +602,69 @@ export function ListPage() {
                     </SelectContent>
                 </Select>
                 <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8"
+                    variant={isFilterExpanded ? 'default' : 'outline'}
+                    className={cn(
+                        'h-11 rounded-xl gap-2',
+                        activeFiltersCount > 0 && !isFilterExpanded && 'border-primary text-primary'
+                    )}
                     onClick={() => setIsFilterExpanded(!isFilterExpanded)}
                 >
-                    詳細フィルター
-                    {isFilterExpanded ? <ChevronUp className="ml-1 h-4 w-4" /> : <ChevronDown className="ml-1 h-4 w-4" />}
+                    <Filter className="h-4 w-4" />
+                    フィルター
+                    {activeFiltersCount > 0 && (
+                        <Badge className="ml-1 h-5 w-5 p-0 flex items-center justify-center rounded-full text-xs">
+                            {activeFiltersCount}
+                        </Badge>
+                    )}
+                    {isFilterExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                 </Button>
             </div>
 
-            {/* Expandable Filter Section with Tabs */}
+            {/* Selection Bar */}
+            {selectedRows.size > 0 && (
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-primary/5 border border-primary/20">
+                    <span className="text-sm font-medium text-primary">
+                        {selectedRows.size} 件選択中
+                    </span>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs"
+                        onClick={() => setSelectedRows(new Set())}
+                    >
+                        選択解除
+                    </Button>
+                </div>
+            )}
+
+            {/* Expandable Filter Section */}
             {isFilterExpanded && (
-                <Card className="p-4">
+                <Card className="p-5 rounded-2xl">
                     {/* Filter Tabs */}
-                    <div className="flex gap-1 mb-4 border-b">
+                    <div className="flex gap-1 mb-4">
                         {(['勤務地', '職種'] as FilterTab[]).map(tab => (
                             <button
                                 key={tab}
-                                className={`px-4 py-2 text-sm font-medium transition-colors ${
+                                className={cn(
+                                    'px-4 py-2 text-sm font-medium rounded-xl transition-all',
                                     activeFilterTab === tab
-                                        ? 'border-b-2 border-blue-500 text-blue-600'
-                                        : 'text-gray-500 hover:text-gray-700'
-                                }`}
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                                )}
                                 onClick={() => setActiveFilterTab(tab)}
                             >
+                                {tab === '勤務地' && <MapPin className="h-4 w-4 inline mr-1.5" />}
+                                {tab === '職種' && <Briefcase className="h-4 w-4 inline mr-1.5" />}
                                 {tab}
                                 {tab === '勤務地' && selectedRegions.size > 0 && (
-                                    <span className="ml-1 text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full">
+                                    <Badge className="ml-1.5 h-5 px-1.5 rounded-full text-xs">
                                         {selectedRegions.size}
-                                    </span>
+                                    </Badge>
                                 )}
                                 {tab === '職種' && selectedJobTypes.size > 0 && (
-                                    <span className="ml-1 text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full">
+                                    <Badge className="ml-1.5 h-5 px-1.5 rounded-full text-xs">
                                         {selectedJobTypes.size}
-                                    </span>
+                                    </Badge>
                                 )}
                             </button>
                         ))}
@@ -600,13 +672,17 @@ export function ListPage() {
 
                     {/* Filter Content */}
                     <div className="min-h-[100px]">
-                        {/* 勤務地 Tab */}
                         {activeFilterTab === '勤務地' && (
-                            <div className="grid grid-cols-5 gap-3">
+                            <div className="grid grid-cols-5 gap-2">
                                 {regionCheckboxOptions.map(region => (
                                     <label
                                         key={region}
-                                        className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded"
+                                        className={cn(
+                                            'flex items-center gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all',
+                                            selectedRegions.has(region)
+                                                ? 'border-primary bg-primary/5'
+                                                : 'border-border hover:border-muted-foreground/30'
+                                        )}
                                     >
                                         <Checkbox
                                             checked={selectedRegions.has(region)}
@@ -618,13 +694,17 @@ export function ListPage() {
                             </div>
                         )}
 
-                        {/* 職種 Tab */}
                         {activeFilterTab === '職種' && (
-                            <div className="grid grid-cols-3 gap-3">
+                            <div className="grid grid-cols-3 gap-2">
                                 {jobTypeCheckboxOptions.map(jobType => (
                                     <label
                                         key={jobType}
-                                        className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded"
+                                        className={cn(
+                                            'flex items-center gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all',
+                                            selectedJobTypes.has(jobType)
+                                                ? 'border-primary bg-primary/5'
+                                                : 'border-border hover:border-muted-foreground/30'
+                                        )}
                                     >
                                         <Checkbox
                                             checked={selectedJobTypes.has(jobType)}
@@ -637,61 +717,25 @@ export function ListPage() {
                         )}
                     </div>
 
-                    {/* Clear Filters Button */}
-                    {(selectedRegions.size > 0 || selectedJobTypes.size > 0) && (
-                        <div className="mt-4 pt-3 border-t flex justify-end">
+                    {/* Clear Filters */}
+                    {activeFiltersCount > 0 && (
+                        <div className="mt-4 pt-4 border-t flex justify-end">
                             <Button
                                 variant="ghost"
                                 size="sm"
+                                className="text-destructive hover:text-destructive"
                                 onClick={() => {
                                     setSelectedRegions(new Set());
                                     setSelectedJobTypes(new Set());
-                                }}
-                            >
-                                フィルターをクリア
-                            </Button>
-                        </div>
-                    )}
-
-                    {/* Active Column Filters Display */}
-                    {(industryFilter !== 'all' || areaFilter !== 'all' || salaryFilter !== 'all' || employeesFilter !== 'all' || sourceFilter !== 'all' || sortColumn) && (
-                        <div className="mt-4 pt-3 border-t flex items-center gap-2 flex-wrap">
-                            <span className="text-sm text-muted-foreground">適用中:</span>
-                            {industryFilter !== 'all' && (
-                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">業種: {industryFilter}</span>
-                            )}
-                            {areaFilter !== 'all' && (
-                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">エリア: {areaFilter}</span>
-                            )}
-                            {salaryFilter !== 'all' && (
-                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">給与: {salaryFilter}</span>
-                            )}
-                            {employeesFilter !== 'all' && (
-                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">規模: {employeesFilter}</span>
-                            )}
-                            {sourceFilter !== 'all' && (
-                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">ソース: {sourceFilter}</span>
-                            )}
-                            {sortColumn && (
-                                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
-                                    並び替え: {sortColumn === 'industry' ? '業種' : sortColumn === 'area' ? 'エリア' : sortColumn === 'salary' ? '給与' : sortColumn === 'employees' ? '規模' : 'ソース'}
-                                    ({sortDirection === 'asc' ? '昇順' : '降順'})
-                                </span>
-                            )}
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 text-xs"
-                                onClick={() => {
                                     setIndustryFilter('all');
                                     setAreaFilter('all');
                                     setSalaryFilter('all');
                                     setEmployeesFilter('all');
                                     setSourceFilter('all');
                                     setSortColumn(null);
-                                    setSortDirection('asc');
                                 }}
                             >
+                                <X className="h-4 w-4 mr-1" />
                                 すべてクリア
                             </Button>
                         </div>
@@ -699,32 +743,32 @@ export function ListPage() {
                 </Card>
             )}
 
-            {/* Compact Table */}
-            <Card className="overflow-hidden">
+            {/* Data Table */}
+            <Card className="overflow-hidden rounded-2xl">
                 <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
+                    <table className="w-full text-sm">
                         <thead className="bg-muted/50 border-b">
                             <tr>
-                                <th className="p-2 w-8">
+                                <th className="p-3 w-10">
                                     <Checkbox
                                         checked={selectedRows.size === filteredCompanies.length && filteredCompanies.length > 0}
                                         onCheckedChange={toggleAllSelection}
                                     />
                                 </th>
-                                <th className="p-2 text-left font-medium w-[160px]">会社名</th>
-                                <th className="p-2 text-left font-medium w-[40px]">詳細</th>
-                                <th className="p-2 text-left font-medium w-[100px]">電話番号</th>
-                                <th className="p-2 text-left font-medium w-[80px]">会社HP</th>
-                                <th className="p-1 text-left font-medium w-[120px]">
+                                <th className="p-3 text-left font-medium w-[180px]">会社名</th>
+                                <th className="p-3 text-left font-medium w-[50px]">詳細</th>
+                                <th className="p-3 text-left font-medium w-[110px]">電話番号</th>
+                                <th className="p-3 text-left font-medium w-[80px]">HP</th>
+                                <th className="p-2 text-left font-medium w-[130px]">
                                     <div className="space-y-1">
                                         <button
-                                            className="flex items-center hover:text-blue-600"
+                                            className="flex items-center hover:text-primary transition-colors"
                                             onClick={() => handleSort('industry')}
                                         >
                                             業種{getSortIcon('industry')}
                                         </button>
                                         <Select value={industryFilter} onValueChange={setIndustryFilter}>
-                                            <SelectTrigger className="h-6 text-[10px] w-full">
+                                            <SelectTrigger className="h-7 text-xs w-full rounded-lg">
                                                 <SelectValue placeholder="全て" />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -736,16 +780,16 @@ export function ListPage() {
                                         </Select>
                                     </div>
                                 </th>
-                                <th className="p-1 text-left font-medium w-[80px]">
+                                <th className="p-2 text-left font-medium w-[90px]">
                                     <div className="space-y-1">
                                         <button
-                                            className="flex items-center hover:text-blue-600"
+                                            className="flex items-center hover:text-primary transition-colors"
                                             onClick={() => handleSort('area')}
                                         >
                                             エリア{getSortIcon('area')}
                                         </button>
                                         <Select value={areaFilter} onValueChange={setAreaFilter}>
-                                            <SelectTrigger className="h-6 text-[10px] w-full">
+                                            <SelectTrigger className="h-7 text-xs w-full rounded-lg">
                                                 <SelectValue placeholder="全て" />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -757,16 +801,16 @@ export function ListPage() {
                                         </Select>
                                     </div>
                                 </th>
-                                <th className="p-1 text-left font-medium w-[100px]">
+                                <th className="p-2 text-left font-medium w-[100px]">
                                     <div className="space-y-1">
                                         <button
-                                            className="flex items-center hover:text-blue-600"
+                                            className="flex items-center hover:text-primary transition-colors"
                                             onClick={() => handleSort('salary')}
                                         >
                                             給与{getSortIcon('salary')}
                                         </button>
                                         <Select value={salaryFilter} onValueChange={setSalaryFilter}>
-                                            <SelectTrigger className="h-6 text-[10px] w-full">
+                                            <SelectTrigger className="h-7 text-xs w-full rounded-lg">
                                                 <SelectValue placeholder="全て" />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -778,16 +822,16 @@ export function ListPage() {
                                         </Select>
                                     </div>
                                 </th>
-                                <th className="p-1 text-left font-medium w-[90px]">
+                                <th className="p-2 text-left font-medium w-[90px]">
                                     <div className="space-y-1">
                                         <button
-                                            className="flex items-center hover:text-blue-600"
+                                            className="flex items-center hover:text-primary transition-colors"
                                             onClick={() => handleSort('employees')}
                                         >
                                             規模{getSortIcon('employees')}
                                         </button>
                                         <Select value={employeesFilter} onValueChange={setEmployeesFilter}>
-                                            <SelectTrigger className="h-6 text-[10px] w-full">
+                                            <SelectTrigger className="h-7 text-xs w-full rounded-lg">
                                                 <SelectValue placeholder="全て" />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -799,30 +843,30 @@ export function ListPage() {
                                         </Select>
                                     </div>
                                 </th>
-                                <th className="p-1 text-left font-medium w-[70px]">
+                                <th className="p-2 text-left font-medium w-[80px]">
                                     <div className="space-y-1">
                                         <button
-                                            className="flex items-center hover:text-blue-600"
+                                            className="flex items-center hover:text-primary transition-colors"
                                             onClick={() => handleSort('source')}
                                         >
                                             ソース{getSortIcon('source')}
                                         </button>
                                         <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                                            <SelectTrigger className="h-6 text-[10px] w-full">
+                                            <SelectTrigger className="h-7 text-xs w-full rounded-lg">
                                                 <SelectValue placeholder="全て" />
                                             </SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="all">全て</SelectItem>
                                                 {filterOptions.sources.map(opt => (
                                                     <SelectItem key={opt} value={opt}>
-                                                        {opt === 'mynavi' ? 'マイナビ' : opt === 'rikunabi' ? 'リクナビ' : opt}
+                                                        {sourceConfig[opt]?.label || opt}
                                                     </SelectItem>
                                                 ))}
                                             </SelectContent>
                                         </Select>
                                     </div>
                                 </th>
-                                <th className="p-2 text-left font-medium w-[70px]">ステータス</th>
+                                <th className="p-3 text-left font-medium w-[90px]">ステータス</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y">
@@ -832,47 +876,48 @@ export function ListPage() {
                                 return (
                                     <tr
                                         key={company.id}
-                                        className="hover:bg-muted/30 h-9"
+                                        className={cn(
+                                            'h-12 transition-colors',
+                                            selectedRows.has(company.id)
+                                                ? 'bg-primary/5'
+                                                : 'hover:bg-muted/50'
+                                        )}
                                     >
-                                        {/* Checkbox */}
-                                        <td className="p-2">
+                                        <td className="p-3">
                                             <Checkbox
                                                 checked={selectedRows.has(company.id)}
                                                 onCheckedChange={() => toggleRowSelection(company.id)}
                                             />
                                         </td>
 
-                                        {/* 会社名 */}
-                                        <td className="p-2">
+                                        <td className="p-3">
                                             <a
                                                 href={company.url}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="text-blue-600 hover:text-blue-800 dark:text-blue-400 truncate max-w-[140px] font-medium block"
+                                                className="text-primary hover:underline truncate max-w-[160px] font-medium block"
                                                 title={formatted.fullCompanyName}
                                             >
                                                 {formatted.companyName}
                                             </a>
                                         </td>
 
-                                        {/* 詳細ボタン */}
-                                        <td className="p-2">
+                                        <td className="p-3">
                                             <Button
                                                 variant="ghost"
-                                                size="sm"
-                                                className="h-6 w-6 p-0"
+                                                size="icon"
+                                                className="h-8 w-8 rounded-lg"
                                                 onClick={() => handleViewDetail(company)}
                                                 title="詳細"
                                             >
-                                                <Eye className="h-3 w-3" />
+                                                <Eye className="h-4 w-4" />
                                             </Button>
                                         </td>
 
-                                        {/* 電話番号 */}
-                                        <td className="p-2">
+                                        <td className="p-3">
                                             {company.phone ? (
                                                 <span
-                                                    className="text-blue-600 cursor-pointer hover:underline truncate block max-w-[90px]"
+                                                    className="text-primary cursor-pointer hover:underline truncate block max-w-[100px] font-mono text-xs"
                                                     onClick={() => navigator.clipboard.writeText(company.phone!)}
                                                     title={`${company.phone} (クリックでコピー)`}
                                                 >
@@ -883,17 +928,16 @@ export function ListPage() {
                                             )}
                                         </td>
 
-                                        {/* 会社HP */}
-                                        <td className="p-2">
+                                        <td className="p-3">
                                             {company.homepage_url ? (
                                                 <a
                                                     href={company.homepage_url}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                                                    className="inline-flex items-center gap-1 text-primary hover:underline"
                                                     title={company.homepage_url}
                                                 >
-                                                    <ExternalLink className="h-3 w-3" />
+                                                    <ExternalLink className="h-3.5 w-3.5" />
                                                     <span className="text-xs">HP</span>
                                                 </a>
                                             ) : (
@@ -901,56 +945,50 @@ export function ListPage() {
                                             )}
                                         </td>
 
-                                        {/* 業種 */}
-                                        <td className="p-2">
+                                        <td className="p-3">
                                             <span
-                                                className="text-muted-foreground truncate block max-w-[90px]"
+                                                className="text-muted-foreground truncate block max-w-[110px] text-xs"
                                                 title={formatted.fullIndustry}
                                             >
                                                 {formatted.industry}
                                             </span>
                                         </td>
 
-                                        {/* エリア */}
-                                        <td className="p-2">
-                                            <span className="text-muted-foreground truncate block max-w-[50px]">
+                                        <td className="p-3">
+                                            <span className="text-muted-foreground truncate block max-w-[70px] text-xs">
                                                 {formatted.area}
                                             </span>
                                         </td>
 
-                                        {/* 給与 */}
-                                        <td className="p-2">
+                                        <td className="p-3">
                                             <span
-                                                className="text-green-600 dark:text-green-400 truncate block max-w-[80px]"
+                                                className="text-green-600 dark:text-green-400 truncate block max-w-[80px] text-xs"
                                                 title={formatted.fullSalary}
                                             >
                                                 {formatted.salary}
                                             </span>
                                         </td>
 
-                                        {/* 規模 */}
-                                        <td className="p-2">
+                                        <td className="p-3">
                                             <span
-                                                className="text-muted-foreground truncate block max-w-[60px]"
+                                                className="text-muted-foreground truncate block max-w-[70px] text-xs"
                                                 title={formatted.fullScale}
                                             >
                                                 {formatted.scale}
                                             </span>
                                         </td>
 
-                                        {/* ソース */}
-                                        <td className="p-2">
+                                        <td className="p-3">
                                             {getSourceBadge(company.source)}
                                         </td>
 
-                                        {/* ステータス */}
-                                        <td className="p-2">
+                                        <td className="p-3">
                                             <Select
                                                 value={company.status}
                                                 onValueChange={(value) => handleStatusChange(company.id, value)}
                                             >
-                                                <SelectTrigger className={`h-6 w-16 text-[10px] text-white border-0 ${getStatusColor(company.status)}`}>
-                                                    <SelectValue />
+                                                <SelectTrigger className="h-7 w-20 text-xs rounded-lg border-0 p-0 focus:ring-0">
+                                                    {getStatusBadge(company.status)}
                                                 </SelectTrigger>
                                                 <SelectContent>
                                                     <SelectItem value="new">新規</SelectItem>
@@ -969,19 +1007,23 @@ export function ListPage() {
                 </div>
 
                 {companies.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground text-sm">
-                        データがありません。検索ページからスクレイピングを開始してください。
+                    <div className="text-center py-16">
+                        <Building2 className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+                        <p className="text-muted-foreground">データがありません</p>
+                        <p className="text-sm text-muted-foreground mt-1">検索ページからスクレイピングを開始してください</p>
                     </div>
                 ) : filteredCompanies.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground text-sm">
-                        条件に一致するデータがありません。フィルターを変更してください。
+                    <div className="text-center py-16">
+                        <Filter className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+                        <p className="text-muted-foreground">条件に一致するデータがありません</p>
+                        <p className="text-sm text-muted-foreground mt-1">フィルターを変更してください</p>
                     </div>
                 ) : null}
             </Card>
 
             {/* Delete Confirmation Dialog */}
             <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-                <DialogContent>
+                <DialogContent className="rounded-2xl">
                     <DialogHeader>
                         <DialogTitle>削除の確認</DialogTitle>
                         <DialogDescription>
@@ -989,9 +1031,10 @@ export function ListPage() {
                             この操作は取り消せません。
                         </DialogDescription>
                     </DialogHeader>
-                    <div className="flex justify-end gap-2 mt-4">
+                    <div className="flex justify-end gap-3 mt-6">
                         <Button
                             variant="outline"
+                            className="rounded-xl"
                             onClick={() => setShowDeleteConfirm(false)}
                             disabled={isDeleting}
                         >
@@ -999,12 +1042,13 @@ export function ListPage() {
                         </Button>
                         <Button
                             variant="destructive"
+                            className="rounded-xl"
                             onClick={handleDelete}
                             disabled={isDeleting}
                         >
                             {isDeleting ? (
                                 <>
-                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
                                     削除中...
                                 </>
                             ) : (
@@ -1017,20 +1061,23 @@ export function ListPage() {
 
             {/* Detail Modal */}
             <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
-                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto rounded-2xl">
                     <DialogHeader>
-                        <DialogTitle>{detailCompany?.company_name}</DialogTitle>
-                        <DialogDescription>
+                        <DialogTitle className="text-xl">{detailCompany?.company_name}</DialogTitle>
+                        <DialogDescription className="flex items-center gap-2">
                             {detailCompany && getSourceBadge(detailCompany.source)} からスクレイピング
                         </DialogDescription>
                     </DialogHeader>
 
                     {detailCompany && (
-                        <div className="space-y-4 pt-4 text-sm">
+                        <div className="space-y-6 pt-4">
                             {/* 基本情報 */}
-                            <section>
-                                <h4 className="font-semibold mb-2 border-b pb-1">基本情報</h4>
-                                <dl className="grid grid-cols-2 gap-2">
+                            <section className="p-4 rounded-xl bg-muted/50">
+                                <h4 className="font-semibold mb-3 flex items-center gap-2">
+                                    <Building2 className="h-4 w-4" />
+                                    基本情報
+                                </h4>
+                                <dl className="grid grid-cols-2 gap-3 text-sm">
                                     <dt className="text-muted-foreground">代表者</dt>
                                     <dd>{detailCompany.representative || '-'}</dd>
                                     <dt className="text-muted-foreground">設立</dt>
@@ -1045,15 +1092,18 @@ export function ListPage() {
                             </section>
 
                             {/* 事業内容 */}
-                            <section>
-                                <h4 className="font-semibold mb-2 border-b pb-1">事業内容</h4>
-                                <p className="whitespace-pre-wrap">{detailCompany.industry || '-'}</p>
+                            <section className="p-4 rounded-xl bg-muted/50">
+                                <h4 className="font-semibold mb-3 flex items-center gap-2">
+                                    <Briefcase className="h-4 w-4" />
+                                    事業内容
+                                </h4>
+                                <p className="text-sm whitespace-pre-wrap">{detailCompany.industry || '-'}</p>
                             </section>
 
                             {/* 採用情報 */}
-                            <section>
-                                <h4 className="font-semibold mb-2 border-b pb-1">採用情報</h4>
-                                <dl className="grid grid-cols-2 gap-2">
+                            <section className="p-4 rounded-xl bg-muted/50">
+                                <h4 className="font-semibold mb-3">採用情報</h4>
+                                <dl className="grid grid-cols-2 gap-3 text-sm">
                                     <dt className="text-muted-foreground">職種</dt>
                                     <dd>{detailCompany.job_title || '-'}</dd>
                                     <dt className="text-muted-foreground">給与</dt>
@@ -1063,21 +1113,36 @@ export function ListPage() {
 
                             {/* リンク */}
                             <section>
-                                <h4 className="font-semibold mb-2 border-b pb-1">リンク</h4>
+                                <h4 className="font-semibold mb-3">リンク</h4>
                                 <div className="flex flex-wrap gap-2">
-                                    <Button variant="outline" size="sm" onClick={() => window.open(detailCompany.url, '_blank')}>
-                                        <ExternalLink className="h-3 w-3 mr-1" />
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="rounded-xl"
+                                        onClick={() => window.open(detailCompany.url, '_blank')}
+                                    >
+                                        <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
                                         求人ページ
                                     </Button>
                                     {detailCompany.homepage_url && (
-                                        <Button variant="outline" size="sm" onClick={() => window.open(detailCompany.homepage_url!, '_blank')}>
-                                            <ExternalLink className="h-3 w-3 mr-1" />
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="rounded-xl"
+                                            onClick={() => window.open(detailCompany.homepage_url!, '_blank')}
+                                        >
+                                            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
                                             企業HP
                                         </Button>
                                     )}
                                     {detailCompany.contact_form_url && (
-                                        <Button variant="outline" size="sm" onClick={() => window.open(detailCompany.contact_form_url!, '_blank')}>
-                                            <ExternalLink className="h-3 w-3 mr-1" />
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="rounded-xl"
+                                            onClick={() => window.open(detailCompany.contact_form_url!, '_blank')}
+                                        >
+                                            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
                                             問い合わせ
                                         </Button>
                                     )}
@@ -1086,9 +1151,9 @@ export function ListPage() {
 
                             {/* メモ */}
                             <section>
-                                <h4 className="font-semibold mb-2 border-b pb-1">メモ</h4>
+                                <h4 className="font-semibold mb-3">メモ</h4>
                                 <textarea
-                                    className="w-full p-2 border rounded text-sm min-h-[80px]"
+                                    className="w-full p-3 border rounded-xl text-sm min-h-[100px] bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary"
                                     placeholder="メモを入力..."
                                     defaultValue={detailCompany.note || ''}
                                     onBlur={(e) => updateCompany(detailCompany.id, { note: e.target.value })}

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
+import { ThemeProvider } from './components/theme-provider';
 import { DashboardPage } from './pages/DashboardPage';
 import { SearchPage } from './pages/SearchPage';
 import { ListPage } from './pages/ListPage';
@@ -16,18 +17,20 @@ function App() {
   }, []);
 
   return (
-    <HashRouter>
-      <div className="min-h-screen bg-background">
-        <Sidebar />
-        <main className="ml-64 p-8">
-          <Routes>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/search" element={<SearchPage />} />
-            <Route path="/list" element={<ListPage />} />
-          </Routes>
-        </main>
-      </div>
-    </HashRouter>
+    <ThemeProvider defaultTheme="light" storageKey="job-hunter-theme">
+      <HashRouter>
+        <div className="min-h-screen bg-background">
+          <Sidebar />
+          <main className="ml-64 p-6">
+            <Routes>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/search" element={<SearchPage />} />
+              <Route path="/list" element={<ListPage />} />
+            </Routes>
+          </main>
+        </div>
+      </HashRouter>
+    </ThemeProvider>
   );
 }
 
