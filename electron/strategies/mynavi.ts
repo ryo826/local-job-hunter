@@ -97,7 +97,10 @@ const jobTypeCodes: Record<string, string> = {
 
 // 求人カードのセレクター候補（優先順位順）
 const JOB_CARD_SELECTORS = [
-    '.cassetteRecruitRecommend__content',  // 実際のHTML構造
+    '.recruitList__item',             // 新しいHTML構造
+    '.recruit',                       // シンプルなrecruitクラス
+    'div.recruit',
+    '.cassetteRecruitRecommend__content',
     '.cassetteRecruit__content',
     '.cassetteRecruit',
     '[class*="cassetteRecruit"]',
@@ -110,6 +113,7 @@ const JOB_CARD_SELECTORS = [
 // 求人詳細リンクのセレクター候補
 const JOB_LINK_SELECTORS = [
     'a[href*="/jobinfo-"]',  // 実際のHTML: //tenshoku.mynavi.jp/jobinfo-405430-1-7-1/
+    '.recruit a[href*="/jobinfo"]',
     'a.linkArrowS',          // 「求人詳細を見る」リンク
     'a.js__ga--setCookieOccName',  // 求人タイトルリンク
     'a[href*="/jobinfo/"]',
@@ -118,16 +122,21 @@ const JOB_LINK_SELECTORS = [
 
 // 会社名セレクター候補
 const COMPANY_NAME_SELECTORS = [
-    'h3.cassetteRecruitRecommend__name',  // 実際のHTML構造
+    '.recruit_company_name',          // 新しいHTML構造
+    '.recruit_company',
+    'h3.cassetteRecruitRecommend__name',
     '.cassetteRecruitRecommend__name',
     '.cassetteRecruit__name',
     '.companyName',
     '[class*="companyName"]',
+    '[class*="company_name"]',
 ];
 
 // 求人タイトルセレクター候補
 const JOB_TITLE_SELECTORS = [
-    '.cassetteRecruitRecommend__copy a',  // 実際のHTML構造
+    '.recruit_job_title',             // 新しいHTML構造
+    '.recruit_title',
+    '.cassetteRecruitRecommend__copy a',
     'p.cassetteRecruitRecommend__copy a',
     '.cassetteRecruit__copy a',
     '.cassetteRecruit__heading',
