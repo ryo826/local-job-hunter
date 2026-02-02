@@ -795,9 +795,34 @@ export class RikunabiStrategy implements ScrapingStrategy {
         }
 
         try {
+            // SPAのためJavaScriptの実行完了を待つ
+            log('Waiting for page to fully load...');
+            try {
+                await page.waitForLoadState('networkidle', { timeout: 15000 });
+            } catch {
+                log('Network idle timeout, continuing...');
+            }
+            await page.waitForTimeout(3000);
+
+            // 求人カードを待機
+            log('Waiting for job cards...');
+            try {
+                await page.waitForSelector('a[class*="styles_bigCard"], [class*="jobCard"], article a', { timeout: 10000 });
+                log('Job cards appeared');
+            } catch {
+                log('Job cards not found, checking page state...');
+                const pageState = await page.evaluate(() => ({
+                    title: document.title,
+                    url: location.href,
+                    hasNext: !!document.getElementById('__next'),
+                    bodyText: document.body.innerText.substring(0, 500)
+                }));
+                log(`Page state: ${JSON.stringify(pageState)}`);
+            }
+
             // 総件数を取得
             if (onTotalCount) {
-                const countElement = page.locator('.styles_bodyText__KY7__, [class*="styles_bodyText"]').first();
+                const countElement = page.locator('.styles_bodyText__KY7__, [class*="styles_bodyText"], [class*="count"]').first();
                 if (await countElement.count() > 0) {
                     const text = await countElement.textContent();
                     if (text) {
@@ -821,7 +846,17 @@ export class RikunabiStrategy implements ScrapingStrategy {
                 pageNum++;
                 log(`Collecting URLs from page ${pageNum}...`);
 
-                const jobCards = await page.locator('a[class*="styles_bigCard"]').all();
+                // 複数のセレクターを試行
+                let jobCards = await page.locator('a[class*="styles_bigCard"]').all();
+                if (jobCards.length === 0) {
+                    jobCards = await page.locator('[class*="jobCard"] a, article a[href*="/viewjob/"]').all();
+                }
+                if (jobCards.length === 0) {
+                    // デバッグ: リンクを探す
+                    const allLinks = await page.locator('a[href*="/viewjob/"]').all();
+                    log(`Found ${allLinks.length} links with /viewjob/`);
+                    jobCards = allLinks;
+                }
                 log(`Found ${jobCards.length} job cards on page ${pageNum}`);
 
                 if (jobCards.length === 0) break;
