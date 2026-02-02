@@ -28,6 +28,10 @@ export interface CompanyData {
     // ランク関連フィールド
     budget_rank?: BudgetRank;
     rank_confidence?: number;
+    // 求人ページ更新日関連フィールド
+    job_page_updated_at?: string | null;  // 求人ページの最終更新日
+    job_page_end_date?: string | null;    // 掲載終了予定日
+    job_page_start_date?: string | null;  // 掲載開始日(doda)
 }
 
 export interface ScrapingParams {

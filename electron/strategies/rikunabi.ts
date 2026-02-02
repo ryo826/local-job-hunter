@@ -13,6 +13,40 @@ interface RankResult {
     confidence: number;
 }
 
+// __NEXT_DATA__から求人ページの公開日を抽出
+async function extractRikunabiJobDate(page: Page): Promise<Date | null> {
+    try {
+        const datePublished = await page.evaluate(() => {
+            const scriptTag = document.querySelector('script#__NEXT_DATA__');
+            if (!scriptTag?.textContent) return null;
+
+            try {
+                const data = JSON.parse(scriptTag.textContent);
+                // datePublishedはミリ秒のタイムスタンプ
+                const timestamp = data?.props?.pageProps?.job?.lettice?.letticeLogBase?.datePublished;
+                if (timestamp) {
+                    return timestamp;
+                }
+                // 別のパスを試す
+                const jobData = data?.props?.pageProps?.jobData;
+                if (jobData?.datePublished) {
+                    return jobData.datePublished;
+                }
+                return null;
+            } catch {
+                return null;
+            }
+        });
+
+        if (datePublished && typeof datePublished === 'number') {
+            return new Date(datePublished);
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
 // リクナビNEXTのランク判定ロジック
 // isJobFlairフラグ > ページ内表示順序
 // リクナビは100件/ページ表示
@@ -409,6 +443,8 @@ export class RikunabiStrategy implements ScrapingStrategy {
                         // ランク情報
                         budget_rank: jobInfo.rankResult.rank,
                         rank_confidence: jobInfo.rankResult.confidence,
+                        // 求人ページ更新日情報（__NEXT_DATA__から取得）
+                        job_page_updated_at: (await extractRikunabiJobDate(page))?.toISOString() || null,
                     };
 
                 } catch (err: any) {

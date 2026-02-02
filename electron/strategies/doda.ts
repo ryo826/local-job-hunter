@@ -13,6 +13,70 @@ interface RankResult {
     confidence: number;
 }
 
+// 日付情報
+interface DodaJobDates {
+    updateDate: Date | null;    // 更新日
+    periodStart: Date | null;   // 掲載開始日
+    periodEnd: Date | null;     // 掲載終了日
+}
+
+// 日付文字列をパース（フォーマット: YYYY/MM/DD または YYYY/M/D）
+function parseJapaneseDate(dateStr: string): Date | null {
+    if (!dateStr) return null;
+    try {
+        const parts = dateStr.split('/');
+        if (parts.length !== 3) return null;
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10);
+        const day = parseInt(parts[2], 10);
+        if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+        return new Date(year, month - 1, day);
+    } catch {
+        return null;
+    }
+}
+
+// dodaの詳細ページから日付情報を抽出
+// 例: "掲載予定期間：2026/2/2（月）～2026/2/8（日）更新日：2026/2/2（月）"
+async function extractDodaJobDates(page: Page): Promise<DodaJobDates> {
+    try {
+        const dateText = await page.evaluate(() => {
+            // 日付コンテナを探す
+            const selectors = [
+                '.jobSearchDetail-heading__publishingDate',
+                '[class*="publishingDate"]',
+                '.detailPublish',
+            ];
+            for (const selector of selectors) {
+                const el = document.querySelector(selector);
+                if (el?.textContent) {
+                    return el.textContent;
+                }
+            }
+            return null;
+        });
+
+        if (!dateText) {
+            return { updateDate: null, periodStart: null, periodEnd: null };
+        }
+
+        // 掲載予定期間を抽出
+        const periodRegex = /掲載予定期間[：:]\s*(\d{4}\/\d{1,2}\/\d{1,2})[（(][月火水木金土日][）)]\s*[～〜ー-]\s*(\d{4}\/\d{1,2}\/\d{1,2})/;
+        const updateRegex = /更新日[：:]\s*(\d{4}\/\d{1,2}\/\d{1,2})/;
+
+        const periodMatch = dateText.match(periodRegex);
+        const updateMatch = dateText.match(updateRegex);
+
+        return {
+            periodStart: periodMatch ? parseJapaneseDate(periodMatch[1]) : null,
+            periodEnd: periodMatch ? parseJapaneseDate(periodMatch[2]) : null,
+            updateDate: updateMatch ? parseJapaneseDate(updateMatch[1]) : null,
+        };
+    } catch {
+        return { updateDate: null, periodStart: null, periodEnd: null };
+    }
+}
+
 // dodaのランク判定ロジック
 // 重要: 「新着」タグ(FillTag-module_tag--red)は使用禁止（掲載時期を示すのみ）
 // 判定基準: PR枠URL > ページ内表示順序
@@ -366,6 +430,9 @@ export class DodaStrategy implements ScrapingStrategy {
 
                     // Note: 電話番号はGoogle Maps APIで後から取得するため、Step 2はスキップ
 
+                    // 求人ページの日付情報を抽出
+                    const jobDates = await extractDodaJobDates(page);
+
                     yield {
                         source: this.source,
                         url: fullUrl,
@@ -385,6 +452,10 @@ export class DodaStrategy implements ScrapingStrategy {
                         // ランク情報
                         budget_rank: rankResult.rank,
                         rank_confidence: rankResult.confidence,
+                        // 求人ページ更新日情報
+                        job_page_updated_at: jobDates.updateDate?.toISOString() || null,
+                        job_page_start_date: jobDates.periodStart?.toISOString() || null,
+                        job_page_end_date: jobDates.periodEnd?.toISOString() || null,
                     };
 
                     // リストページに戻る

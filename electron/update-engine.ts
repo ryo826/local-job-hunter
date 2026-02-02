@@ -29,6 +29,9 @@ interface JobListing {
     rank: BudgetRank;
     url: string;
     source: string;
+    // 求人ページ更新日関連
+    jobPageUpdatedAt?: Date | null;
+    jobPageEndDate?: Date | null;
 }
 
 interface ScrapingResult {
@@ -40,6 +43,9 @@ interface ScrapingResult {
         doda: number;
         rikunabi: number;
     };
+    // 最新の求人ページ更新日
+    latestJobPageUpdatedAt: Date | null;
+    latestJobPageEndDate: Date | null;
 }
 
 export class UpdateEngine {
@@ -246,12 +252,51 @@ export class UpdateEngine {
                         // ランク判定
                         const rank = await this.classifyMynaviCard(card, 1);
 
+                        // 日付情報を抽出
+                        const dataTy = await card.getAttribute('data-ty').catch(() => null);
+                        const isPremium = dataTy === 'rzs';
+                        const updateSelector = isPremium
+                            ? '.cassetteRecruitRecommend__updateDate span, .cassetteRecruitRecommend__updateDate'
+                            : '.cassetteRecruit__updateDate span, .cassetteRecruit__updateDate';
+                        const endSelector = isPremium
+                            ? '.cassetteRecruitRecommend__endDate span, .cassetteRecruitRecommend__endDate'
+                            : '.cassetteRecruit__endDate span, .cassetteRecruit__endDate';
+
+                        let jobPageUpdatedAt: Date | null = null;
+                        let jobPageEndDate: Date | null = null;
+
+                        const updateDateEl = card.locator(updateSelector).first();
+                        if (await updateDateEl.count() > 0) {
+                            const updateDateText = await updateDateEl.textContent({ timeout: 2000 }).catch(() => null);
+                            if (updateDateText) {
+                                const match = updateDateText.match(/(\d{4}\/\d{1,2}\/\d{1,2})/);
+                                if (match) {
+                                    const parts = match[1].split('/');
+                                    jobPageUpdatedAt = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                                }
+                            }
+                        }
+
+                        const endDateEl = card.locator(endSelector).first();
+                        if (await endDateEl.count() > 0) {
+                            const endDateText = await endDateEl.textContent({ timeout: 2000 }).catch(() => null);
+                            if (endDateText) {
+                                const match = endDateText.match(/(\d{4}\/\d{1,2}\/\d{1,2})/);
+                                if (match) {
+                                    const parts = match[1].split('/');
+                                    jobPageEndDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                                }
+                            }
+                        }
+
                         jobs.push({
                             title: title?.trim() || '',
                             company: cardCompanyName.trim(),
                             rank,
                             url: url || '',
                             source: 'mynavi',
+                            jobPageUpdatedAt,
+                            jobPageEndDate,
                         });
                     }
                 } catch {
@@ -509,6 +554,22 @@ export class UpdateEngine {
             bestRank = 'C';
         }
 
+        // 最新の求人ページ更新日を取得
+        let latestJobPageUpdatedAt: Date | null = null;
+        let latestJobPageEndDate: Date | null = null;
+        for (const job of allJobs) {
+            if (job.jobPageUpdatedAt) {
+                if (!latestJobPageUpdatedAt || job.jobPageUpdatedAt > latestJobPageUpdatedAt) {
+                    latestJobPageUpdatedAt = job.jobPageUpdatedAt;
+                }
+            }
+            if (job.jobPageEndDate) {
+                if (!latestJobPageEndDate || job.jobPageEndDate > latestJobPageEndDate) {
+                    latestJobPageEndDate = job.jobPageEndDate;
+                }
+            }
+        }
+
         return {
             jobs: allJobs,
             rank: bestRank,
@@ -518,6 +579,8 @@ export class UpdateEngine {
                 doda: dodaJobs.length,
                 rikunabi: rikunabiJobs.length,
             },
+            latestJobPageUpdatedAt,
+            latestJobPageEndDate,
         };
     }
 
@@ -602,6 +665,16 @@ export class UpdateEngine {
         if (newData.jobs.length > 0) {
             updates.push('latest_job_title = ?');
             params.push(newData.jobs[0].title);
+        }
+
+        // 求人ページ更新日
+        if (newData.latestJobPageUpdatedAt) {
+            updates.push('job_page_updated_at = ?');
+            params.push(newData.latestJobPageUpdatedAt.toISOString());
+        }
+        if (newData.latestJobPageEndDate) {
+            updates.push('job_page_end_date = ?');
+            params.push(newData.latestJobPageEndDate.toISOString());
         }
 
         params.push(companyId);

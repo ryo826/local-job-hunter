@@ -114,6 +114,34 @@ const sourceConfig: Record<string, { label: string; className: string }> = {
     doda: { label: 'doda', className: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300' },
 };
 
+// 求人ページ更新日のフォーマットと鮮度判定
+const formatJobPageUpdated = (dateStr: string | null): { text: string; daysAgo: number; className: string } => {
+    if (!dateStr) {
+        return { text: '-', daysAgo: -1, className: 'text-muted-foreground' };
+    }
+
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const daysAgo = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    // 日付フォーマット: M/D
+    const formatted = `${date.getMonth() + 1}/${date.getDate()}`;
+    let className: string;
+
+    if (daysAgo <= 3) {
+        className = 'text-green-600 dark:text-green-400';  // 最新
+    } else if (daysAgo <= 7) {
+        className = 'text-blue-600 dark:text-blue-400';    // 比較的新しい
+    } else if (daysAgo <= 14) {
+        className = 'text-yellow-600 dark:text-yellow-400'; // やや古い
+    } else {
+        className = 'text-red-600 dark:text-red-400';      // 古い
+    }
+
+    return { text: `${formatted} (${daysAgo}日前)`, daysAgo, className };
+};
+
 // 最終取得日のフォーマットと鮮度判定
 const formatLastFetched = (dateStr: string | null): { text: string; daysAgo: number; className: string } => {
     if (!dateStr) {
@@ -1061,7 +1089,8 @@ export function ListPage() {
                                         </Select>
                                     </div>
                                 </th>
-                                <th className="p-3 text-left font-medium w-[80px] bg-muted/50">最終取得</th>
+                                <th className="p-3 text-left font-medium w-[90px] bg-muted/50" title="求人サイト上での情報更新日">求人更新</th>
+                                <th className="p-3 text-left font-medium w-[80px] bg-muted/50" title="このシステムが情報を取得した日時">取得日</th>
                                 <th className="p-3 text-left font-medium w-[90px]">ステータス</th>
                             </tr>
                         </thead>
@@ -1180,6 +1209,27 @@ export function ListPage() {
 
                                         <td className="p-3 w-[100px]">
                                             {getSourceBadge(company.source)}
+                                        </td>
+
+                                        <td className="p-3 w-[90px]">
+                                            {(() => {
+                                                const jobPageUpdated = formatJobPageUpdated(company.job_page_updated_at);
+                                                return (
+                                                    <div className="flex flex-col">
+                                                        <span
+                                                            className={cn('text-xs font-medium', jobPageUpdated.className)}
+                                                            title={company.job_page_updated_at || ''}
+                                                        >
+                                                            {jobPageUpdated.text}
+                                                        </span>
+                                                        {company.job_page_end_date && (
+                                                            <span className="text-xs text-muted-foreground" title="掲載終了予定日">
+                                                                終了: {new Date(company.job_page_end_date).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })()}
                                         </td>
 
                                         <td className="p-3 w-[80px]">

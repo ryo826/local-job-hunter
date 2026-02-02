@@ -154,6 +154,9 @@ export function initDB() {
 
     // 更新機能関連カラムのマイグレーション
     migrateUpdateColumns(database);
+
+    // 求人ページ更新日関連カラムのマイグレーション
+    migrateJobPageDateColumns(database);
 }
 
 // ランク関連カラムを既存テーブルに追加するマイグレーション
@@ -234,6 +237,33 @@ function migrateUpdateColumns(database: Database.Database) {
     // インデックス作成
     database.exec(`CREATE INDEX IF NOT EXISTS idx_companies_last_updated_at ON companies(last_updated_at)`);
     database.exec(`CREATE INDEX IF NOT EXISTS idx_companies_listing_status ON companies(listing_status)`);
+}
+
+// 求人ページ更新日関連カラムを追加するマイグレーション
+function migrateJobPageDateColumns(database: Database.Database) {
+    const tableInfo = database.prepare('PRAGMA table_info(companies)').all() as Array<{ name: string }>;
+    const existingColumns = new Set(tableInfo.map(col => col.name));
+
+    // job_page_updated_at: 求人ページの最終更新日
+    if (!existingColumns.has('job_page_updated_at')) {
+        console.log('[Database] Adding job_page_updated_at column to companies table');
+        database.exec(`ALTER TABLE companies ADD COLUMN job_page_updated_at DATETIME`);
+    }
+
+    // job_page_end_date: 掲載終了予定日
+    if (!existingColumns.has('job_page_end_date')) {
+        console.log('[Database] Adding job_page_end_date column to companies table');
+        database.exec(`ALTER TABLE companies ADD COLUMN job_page_end_date DATETIME`);
+    }
+
+    // job_page_start_date: 掲載開始日（doda用）
+    if (!existingColumns.has('job_page_start_date')) {
+        console.log('[Database] Adding job_page_start_date column to companies table');
+        database.exec(`ALTER TABLE companies ADD COLUMN job_page_start_date DATETIME`);
+    }
+
+    // インデックス作成
+    database.exec(`CREATE INDEX IF NOT EXISTS idx_companies_job_page_updated ON companies(job_page_updated_at DESC)`);
 }
 
 // Repository Functions

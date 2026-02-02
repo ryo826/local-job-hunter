@@ -14,6 +14,78 @@ interface RankResult {
     confidence: number;
 }
 
+// 日付情報
+interface JobPageDates {
+    updateDate: Date | null;  // 情報更新日
+    endDate: Date | null;     // 掲載終了予定日
+}
+
+// 日付文字列をパース（フォーマット: YYYY/MM/DD または YYYY/M/D）
+function parseJapaneseDate(dateStr: string): Date | null {
+    if (!dateStr) return null;
+    try {
+        // "2026/1/30" → "2026/01/30" に正規化
+        const parts = dateStr.split('/');
+        if (parts.length !== 3) return null;
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10);
+        const day = parseInt(parts[2], 10);
+        if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+        return new Date(year, month - 1, day);
+    } catch {
+        return null;
+    }
+}
+
+// マイナビのカードから日付情報を抽出
+async function extractMynaviJobDates(card: Locator): Promise<JobPageDates> {
+    try {
+        // プレミアム枠か通常枠かを判定
+        const dataTy = await card.getAttribute('data-ty');
+        const isPremium = dataTy === 'rzs';
+
+        // セレクタを選択
+        const updateSelector = isPremium
+            ? '.cassetteRecruitRecommend__updateDate span, .cassetteRecruitRecommend__updateDate'
+            : '.cassetteRecruit__updateDate span, .cassetteRecruit__updateDate';
+
+        const endSelector = isPremium
+            ? '.cassetteRecruitRecommend__endDate span, .cassetteRecruitRecommend__endDate'
+            : '.cassetteRecruit__endDate span, .cassetteRecruit__endDate';
+
+        // 更新日を取得
+        let updateDate: Date | null = null;
+        const updateDateEl = card.locator(updateSelector).first();
+        if (await updateDateEl.count() > 0) {
+            const updateDateText = await updateDateEl.textContent({ timeout: 2000 }).catch(() => null);
+            if (updateDateText) {
+                // "情報更新日:2026/1/30" や "2026/1/30" の形式をパース
+                const match = updateDateText.match(/(\d{4}\/\d{1,2}\/\d{1,2})/);
+                if (match) {
+                    updateDate = parseJapaneseDate(match[1]);
+                }
+            }
+        }
+
+        // 掲載終了日を取得
+        let endDate: Date | null = null;
+        const endDateEl = card.locator(endSelector).first();
+        if (await endDateEl.count() > 0) {
+            const endDateText = await endDateEl.textContent({ timeout: 2000 }).catch(() => null);
+            if (endDateText) {
+                const match = endDateText.match(/(\d{4}\/\d{1,2}\/\d{1,2})/);
+                if (match) {
+                    endDate = parseJapaneseDate(match[1]);
+                }
+            }
+        }
+
+        return { updateDate, endDate };
+    } catch {
+        return { updateDate: null, endDate: null };
+    }
+}
+
 // マイナビ転職のランク判定ロジック
 // 優先度: data-ty="rzs" > 注目枠ラベル > ページ番号
 async function classifyMynavi(card: Locator, pageNum: number): Promise<RankResult> {
@@ -286,11 +358,13 @@ export class MynaviStrategy implements ScrapingStrategy {
             }
 
             // 各カードからURLリストを先に抽出（ページ遷移しても失われないように）
-            const jobUrls: { url: string; companyName: string; jobTitle: string; rankResult: RankResult }[] = [];
+            const jobUrls: { url: string; companyName: string; jobTitle: string; rankResult: RankResult; dates: JobPageDates }[] = [];
 
             for (const card of jobCards) {
                 // ランク判定
                 const rankResult = await classifyMynavi(card, pageNum);
+                // 日付情報を抽出
+                const dates = await extractMynaviJobDates(card);
                 try {
                     // リンクを取得（複数のセレクターを試行）
                     let url: string | null = null;
@@ -365,7 +439,7 @@ export class MynaviStrategy implements ScrapingStrategy {
                         }
                     }
 
-                    jobUrls.push({ url: fullUrl, companyName, jobTitle, rankResult });
+                    jobUrls.push({ url: fullUrl, companyName, jobTitle, rankResult, dates });
                 } catch (err) {
                     log(`Error extracting job URL from card: ${err}`);
                 }
@@ -458,6 +532,9 @@ export class MynaviStrategy implements ScrapingStrategy {
                         // ランク情報
                         budget_rank: jobInfo.rankResult.rank,
                         rank_confidence: jobInfo.rankResult.confidence,
+                        // 求人ページ更新日情報
+                        job_page_updated_at: jobInfo.dates.updateDate?.toISOString() || null,
+                        job_page_end_date: jobInfo.dates.endDate?.toISOString() || null,
                     };
 
                 } catch (err) {
