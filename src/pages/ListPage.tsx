@@ -114,6 +114,43 @@ const sourceConfig: Record<string, { label: string; className: string }> = {
     doda: { label: 'doda', className: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300' },
 };
 
+// 最終取得日のフォーマットと鮮度判定
+const formatLastFetched = (dateStr: string | null): { text: string; daysAgo: number; className: string } => {
+    if (!dateStr) {
+        return { text: '-', daysAgo: -1, className: 'text-muted-foreground' };
+    }
+
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const daysAgo = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    let text: string;
+    let className: string;
+
+    if (daysAgo === 0) {
+        text = '今日';
+        className = 'text-green-600 dark:text-green-400';
+    } else if (daysAgo === 1) {
+        text = '昨日';
+        className = 'text-green-600 dark:text-green-400';
+    } else if (daysAgo <= 3) {
+        text = `${daysAgo}日前`;
+        className = 'text-blue-600 dark:text-blue-400';
+    } else if (daysAgo <= 7) {
+        text = `${daysAgo}日前`;
+        className = 'text-yellow-600 dark:text-yellow-400';
+    } else if (daysAgo <= 30) {
+        text = `${daysAgo}日前`;
+        className = 'text-orange-600 dark:text-orange-400';
+    } else {
+        text = `${daysAgo}日前`;
+        className = 'text-red-600 dark:text-red-400';
+    }
+
+    return { text, daysAgo, className };
+};
+
 // Status badge config
 const statusConfig: Record<string, { label: string; className: string }> = {
     new: { label: '新規', className: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' },
@@ -1024,6 +1061,7 @@ export function ListPage() {
                                         </Select>
                                     </div>
                                 </th>
+                                <th className="p-3 text-left font-medium w-[80px] bg-muted/50">最終取得</th>
                                 <th className="p-3 text-left font-medium w-[90px]">ステータス</th>
                             </tr>
                         </thead>
@@ -1142,6 +1180,20 @@ export function ListPage() {
 
                                         <td className="p-3 w-[100px]">
                                             {getSourceBadge(company.source)}
+                                        </td>
+
+                                        <td className="p-3 w-[80px]">
+                                            {(() => {
+                                                const lastFetched = formatLastFetched(company.last_updated_at || company.created_at);
+                                                return (
+                                                    <span
+                                                        className={cn('text-xs font-medium', lastFetched.className)}
+                                                        title={company.last_updated_at || company.created_at || ''}
+                                                    >
+                                                        {lastFetched.text}
+                                                    </span>
+                                                );
+                                            })()}
                                         </td>
 
                                         <td className="p-3">
