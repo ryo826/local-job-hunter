@@ -636,11 +636,14 @@ export class DodaStrategy implements ScrapingStrategy {
     async scrapeJobDetail(page: Page, jobInfo: JobCardInfo, log?: (msg: string) => void): Promise<CompanyData | null> {
         const logFn = log || ((msg: string) => console.log(`[Doda] ${msg}`));
 
-        try {
-            logFn(`Visiting: ${jobInfo.companyName}`);
+        // リトライロジック
+        let retries = 2;
+        while (retries >= 0) {
+            try {
+                logFn(`Visiting: ${jobInfo.companyName}`);
 
-            await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-            await page.waitForTimeout(randomDelay(500, 1000));
+                await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                await page.waitForTimeout(randomDelay(500, 1000));
 
             // 404チェック
             const is404 = await page.locator('text=/404|ページが見つかりません/i').count() > 0;
@@ -659,7 +662,7 @@ export class DodaStrategy implements ScrapingStrategy {
                 }
                 jobDetailUrl = jobDetailUrl.replace(/\/+/g, '/').replace(':/', '://');
 
-                await page.goto(jobDetailUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+                await page.goto(jobDetailUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
                 await page.waitForTimeout(randomDelay(300, 700));
             }
 
@@ -711,16 +714,24 @@ export class DodaStrategy implements ScrapingStrategy {
                 homepage_url: companyUrl,
                 industry: normalizeIndustry(industry),
                 scrape_status: 'step1_completed',
-                budget_rank: jobInfo.rank,
-                rank_confidence: jobInfo.rank === 'A' ? 0.9 : (jobInfo.rank === 'B' ? 0.7 : 0.6),
-                job_page_updated_at: jobDates.updateDate?.toISOString() || null,
-                job_page_start_date: jobDates.periodStart?.toISOString() || null,
-                job_page_end_date: jobDates.periodEnd?.toISOString() || null,
-            };
-        } catch (error: any) {
-            logFn(`Error scraping ${jobInfo.companyName}: ${error.message}`);
-            return null;
+                    budget_rank: jobInfo.rank,
+                    rank_confidence: jobInfo.rank === 'A' ? 0.9 : (jobInfo.rank === 'B' ? 0.7 : 0.6),
+                    job_page_updated_at: jobDates.updateDate?.toISOString() || null,
+                    job_page_start_date: jobDates.periodStart?.toISOString() || null,
+                    job_page_end_date: jobDates.periodEnd?.toISOString() || null,
+                };
+            } catch (error: any) {
+                retries--;
+                if (retries >= 0) {
+                    logFn(`Retry (${2 - retries}/2) for ${jobInfo.companyName}: ${error.message}`);
+                    await page.waitForTimeout(2000);
+                } else {
+                    logFn(`Failed ${jobInfo.companyName}: ${error.message}`);
+                    return null;
+                }
+            }
         }
+        return null;
     }
 
     // リストページの求人カードから情報を抽出

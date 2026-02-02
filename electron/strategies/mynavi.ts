@@ -1038,30 +1038,33 @@ export class MynaviStrategy implements ScrapingStrategy {
     async scrapeJobDetail(page: Page, jobInfo: JobCardInfo, log?: (msg: string) => void): Promise<CompanyData | null> {
         const logFn = log || ((msg: string) => console.log(`[Mynavi] ${msg}`));
 
-        try {
-            logFn(`Visiting: ${jobInfo.companyName}`);
+        // リトライロジック
+        let retries = 2;
+        while (retries >= 0) {
+            try {
+                logFn(`Visiting: ${jobInfo.companyName}`);
 
-            await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-            await page.waitForTimeout(randomDelay(300, 700));
+                await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                await page.waitForTimeout(randomDelay(300, 700));
 
-            // 404チェック
-            const is404 = await page.locator('text=/404|ページが見つかりません|お探しのページは|掲載が終了/i').count() > 0;
-            if (is404) {
-                logFn('Page not found or job expired, skipping');
-                return null;
-            }
+                // 404チェック
+                const is404 = await page.locator('text=/404|ページが見つかりません|お探しのページは|掲載が終了/i').count() > 0;
+                if (is404) {
+                    logFn('Page not found or job expired, skipping');
+                    return null;
+                }
 
-            // 企業情報を抽出
-            const companyUrl = await this.extractCompanyUrl(page);
-            const address = await this.extractTableValue(page, '本社所在地') ||
-                await this.extractTableValue(page, '勤務地');
-            const industry = await this.extractTableValue(page, '事業内容') ||
-                await this.extractTableValue(page, '業種');
-            const employees = await this.extractTableValue(page, '従業員数');
-            const establishment = await this.extractTableValue(page, '設立');
-            const representative = await this.extractTableValue(page, '代表者');
-            const salaryText = await this.extractTableValue(page, '給与') ||
-                await this.extractTableValue(page, '年収');
+                // 企業情報を抽出
+                const companyUrl = await this.extractCompanyUrl(page);
+                const address = await this.extractTableValue(page, '本社所在地') ||
+                    await this.extractTableValue(page, '勤務地');
+                const industry = await this.extractTableValue(page, '事業内容') ||
+                    await this.extractTableValue(page, '業種');
+                const employees = await this.extractTableValue(page, '従業員数');
+                const establishment = await this.extractTableValue(page, '設立');
+                const representative = await this.extractTableValue(page, '代表者');
+                const salaryText = await this.extractTableValue(page, '給与') ||
+                    await this.extractTableValue(page, '年収');
 
             // 会社名
             let companyName = jobInfo.companyName;
@@ -1094,10 +1097,18 @@ export class MynaviStrategy implements ScrapingStrategy {
                 rank_confidence: jobInfo.rank === 'A' ? 0.9 : (jobInfo.rank === 'B' ? 0.7 : 0.6),
                 job_page_updated_at: null,
                 job_page_end_date: null,
-            };
-        } catch (error: any) {
-            logFn(`Error scraping ${jobInfo.companyName}: ${error.message}`);
-            return null;
+                };
+            } catch (error: any) {
+                retries--;
+                if (retries >= 0) {
+                    logFn(`Retry (${2 - retries}/2) for ${jobInfo.companyName}: ${error.message}`);
+                    await page.waitForTimeout(2000);
+                } else {
+                    logFn(`Failed ${jobInfo.companyName}: ${error.message}`);
+                    return null;
+                }
+            }
         }
+        return null;
     }
 }
