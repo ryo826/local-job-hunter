@@ -21,8 +21,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             {/* Sidebar */}
             <div
                 className={cn(
-                    'fixed left-0 top-0 h-screen border-r border-border bg-card flex flex-col transition-all duration-300 ease-in-out z-50',
-                    collapsed ? 'w-0 -translate-x-full' : 'w-64'
+                    'fixed left-0 top-0 h-screen border-r border-border bg-card flex flex-col transition-all duration-300 ease-in-out z-50 overflow-hidden',
+                    collapsed ? 'w-0' : 'w-64'
                 )}
             >
                 {/* Logo/Header */}
