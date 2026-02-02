@@ -10,6 +10,14 @@ function randomDelay(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// 会社名を検索用に正規化
+function normalizeCompanyName(name: string): string {
+    return name
+        .replace(/株式会社|有限会社|合同会社|（株）|\(株\)|㈱/g, '')
+        .replace(/\s+/g, '')
+        .trim();
+}
+
 function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -173,16 +181,14 @@ export class UpdateEngine {
         });
 
         try {
-            const page = await context.newPage();
+            // 検索用に会社名を正規化
+            const searchName = normalizeCompanyName(company.company_name);
+            log(`検索キーワード: ${searchName}`);
 
-            // 各サイトで並列検索
-            const [mynaviJobs, dodaJobs, rikunabiJobs] = await Promise.all([
-                this.scrapeMynaviForCompany(page, company.company_name, log).catch(() => []),
-                this.scrapeDodaForCompany(page, company.company_name, log).catch(() => []),
-                this.scrapeRikunabiForCompany(page, company.company_name, log).catch(() => []),
-            ]);
-
-            await page.close();
+            // 各サイトで順次検索（別ページを使用）
+            const mynaviJobs = await this.scrapeMynaviForCompany(context, searchName, company.company_name, log);
+            const dodaJobs = await this.scrapeDodaForCompany(context, searchName, company.company_name, log);
+            const rikunabiJobs = await this.scrapeRikunabiForCompany(context, searchName, company.company_name, log);
 
             // 結果を集約
             const aggregated = this.aggregateResults(mynaviJobs, dodaJobs, rikunabiJobs);
@@ -207,40 +213,49 @@ export class UpdateEngine {
 
     // マイナビで会社名検索
     private async scrapeMynaviForCompany(
-        page: Page,
-        companyName: string,
+        context: any,
+        searchName: string,
+        originalName: string,
         log: (msg: string) => void
     ): Promise<JobListing[]> {
-        const searchUrl = `https://tenshoku.mynavi.jp/list/kw${encodeURIComponent(companyName)}/`;
-        log(`[Mynavi] 検索: ${companyName}`);
+        const page = await context.newPage();
+        // マイナビの検索URL（フリーワード検索）
+        const searchUrl = `https://tenshoku.mynavi.jp/list/kw${encodeURIComponent(searchName)}/`;
+        log(`[Mynavi] 検索: ${searchName}`);
 
         try {
-            await page.goto(searchUrl, { waitUntil: 'networkidle', timeout: 30000 });
+            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
             await page.waitForTimeout(randomDelay(2000, 4000));
 
             const jobs: JobListing[] = [];
-            const cards = await page.locator('.cassetteRecruitRecommend, .recruitList__item, .recruit').all();
+            const cards = await page.locator('.cassetteRecruit__content, .cassetteRecruitRecommend').all();
 
-            for (let i = 0; i < cards.length; i++) {
-                const card = cards[i];
-                const cardCompanyName = await card.locator('.cassetteRecruitRecommend__name, .recruit_company_name, .recruit_company').first().textContent();
+            for (let i = 0; i < Math.min(cards.length, 10); i++) {
+                try {
+                    const card = cards[i];
+                    const nameEl = card.locator('.cassetteRecruit__name, .cassetteRecruitRecommend__name').first();
+                    const cardCompanyName = await nameEl.textContent({ timeout: 3000 }).catch(() => null);
 
-                // 会社名の部分一致チェック
-                if (cardCompanyName && this.isCompanyMatch(cardCompanyName.trim(), companyName)) {
-                    const title = await card.locator('.cassetteRecruitRecommend__copy, .recruit_job_title, .recruit_title').first().textContent();
-                    const linkEl = card.locator('a[href*="/jobinfo"]').first();
-                    const url = await linkEl.getAttribute('href');
+                    // 会社名の部分一致チェック
+                    if (cardCompanyName && this.isCompanyMatch(cardCompanyName.trim(), originalName)) {
+                        const titleEl = card.locator('.cassetteRecruit__copy, .cassetteRecruitRecommend__copy').first();
+                        const title = await titleEl.textContent({ timeout: 3000 }).catch(() => '');
+                        const linkEl = card.locator('a[href*="/jobinfo"]').first();
+                        const url = await linkEl.getAttribute('href').catch(() => '');
 
-                    // ランク判定
-                    const rank = await this.classifyMynaviCard(card, 1);
+                        // ランク判定
+                        const rank = await this.classifyMynaviCard(card, 1);
 
-                    jobs.push({
-                        title: title?.trim() || '',
-                        company: cardCompanyName.trim(),
-                        rank,
-                        url: url || '',
-                        source: 'mynavi',
-                    });
+                        jobs.push({
+                            title: title?.trim() || '',
+                            company: cardCompanyName.trim(),
+                            rank,
+                            url: url || '',
+                            source: 'mynavi',
+                        });
+                    }
+                } catch {
+                    // 個別カードのエラーは無視
                 }
             }
 
@@ -250,44 +265,55 @@ export class UpdateEngine {
         } catch (error: any) {
             log(`[Mynavi] エラー: ${error.message}`);
             return [];
+        } finally {
+            await page.close();
         }
     }
 
     // dodaで会社名検索
     private async scrapeDodaForCompany(
-        page: Page,
-        companyName: string,
+        context: any,
+        searchName: string,
+        originalName: string,
         log: (msg: string) => void
     ): Promise<JobListing[]> {
-        const searchUrl = `https://doda.jp/DodaFront/View/JobSearchList/j_kw__${encodeURIComponent(companyName)}/`;
-        log(`[doda] 検索: ${companyName}`);
+        const page = await context.newPage();
+        // dodaの検索URL（キーワード検索）
+        const searchUrl = `https://doda.jp/keyword/${encodeURIComponent(searchName)}/`;
+        log(`[doda] 検索: ${searchName}`);
 
         try {
             await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
             await page.waitForTimeout(randomDelay(2000, 4000));
 
             const jobs: JobListing[] = [];
-            const cards = await page.locator('.jobCard-card').all();
+            const cards = await page.locator('[class*="JobCard"]').all();
 
-            for (let i = 0; i < cards.length; i++) {
-                const card = cards[i];
-                const cardCompanyName = await card.locator('.jobCard-header__company').first().textContent();
+            for (let i = 0; i < Math.min(cards.length, 10); i++) {
+                try {
+                    const card = cards[i];
+                    const companyEl = card.locator('[class*="company"], [class*="Company"]').first();
+                    const cardCompanyName = await companyEl.textContent({ timeout: 3000 }).catch(() => null);
 
-                if (cardCompanyName && this.isCompanyMatch(cardCompanyName.trim(), companyName)) {
-                    const title = await card.locator('.jobCard-header__title').first().textContent();
-                    const linkEl = card.locator('a.jobCard-header__link').first();
-                    const url = await linkEl.getAttribute('href');
+                    if (cardCompanyName && this.isCompanyMatch(cardCompanyName.trim(), originalName)) {
+                        const titleEl = card.locator('[class*="title"], [class*="Title"]').first();
+                        const title = await titleEl.textContent({ timeout: 3000 }).catch(() => '');
+                        const linkEl = card.locator('a[href*="/job/"]').first();
+                        const url = await linkEl.getAttribute('href').catch(() => '');
 
-                    // ランク判定
-                    const rank = await this.classifyDodaCard(card, i);
+                        // ランク判定
+                        const rank = await this.classifyDodaCard(card, i);
 
-                    jobs.push({
-                        title: title?.trim() || '',
-                        company: cardCompanyName.trim(),
-                        rank,
-                        url: url || '',
-                        source: 'doda',
-                    });
+                        jobs.push({
+                            title: title?.trim() || '',
+                            company: cardCompanyName.trim(),
+                            rank,
+                            url: url || '',
+                            source: 'doda',
+                        });
+                    }
+                } catch {
+                    // 個別カードのエラーは無視
                 }
             }
 
@@ -297,17 +323,22 @@ export class UpdateEngine {
         } catch (error: any) {
             log(`[doda] エラー: ${error.message}`);
             return [];
+        } finally {
+            await page.close();
         }
     }
 
     // リクナビNEXTで会社名検索
     private async scrapeRikunabiForCompany(
-        page: Page,
-        companyName: string,
+        context: any,
+        searchName: string,
+        originalName: string,
         log: (msg: string) => void
     ): Promise<JobListing[]> {
-        const searchUrl = `https://next.rikunabi.com/job_search/?kw=${encodeURIComponent(companyName)}`;
-        log(`[Rikunabi] 検索: ${companyName}`);
+        const page = await context.newPage();
+        // リクナビNEXTの検索URL
+        const searchUrl = `https://next.rikunabi.com/rnc/docs/cp_s00890.jsp?keyword=${encodeURIComponent(searchName)}`;
+        log(`[Rikunabi] 検索: ${searchName}`);
 
         try {
             await page.addInitScript(() => {
@@ -318,26 +349,61 @@ export class UpdateEngine {
             await page.waitForTimeout(randomDelay(3000, 5000));
 
             const jobs: JobListing[] = [];
-            const cards = await page.locator('a[class*="styles_bigCard"]').all();
+            // 複数のセレクターを試行
+            const cardSelectors = [
+                'a[class*="Card"]',
+                '[class*="jobCard"]',
+                '[class*="JobCard"]',
+                '.rnn-jobCard',
+            ];
 
-            for (let i = 0; i < cards.length; i++) {
-                const card = cards[i];
-                const cardCompanyName = await card.locator('[class*="styles_companyName"]').first().textContent();
+            let cards: any[] = [];
+            for (const selector of cardSelectors) {
+                cards = await page.locator(selector).all();
+                if (cards.length > 0) {
+                    log(`[Rikunabi] セレクター ${selector} で ${cards.length}件のカードを検出`);
+                    break;
+                }
+            }
 
-                if (cardCompanyName && this.isCompanyMatch(cardCompanyName.trim(), companyName)) {
-                    const title = await card.locator('[class*="styles_title"]').first().textContent();
-                    const url = await card.getAttribute('href');
+            for (let i = 0; i < Math.min(cards.length, 10); i++) {
+                try {
+                    const card = cards[i];
+                    // 会社名を複数セレクターで探す
+                    let cardCompanyName: string | null = null;
+                    const companySelectors = [
+                        '[class*="companyName"]',
+                        '[class*="company"]',
+                        '.rnn-companyName',
+                    ];
+                    for (const sel of companySelectors) {
+                        cardCompanyName = await card.locator(sel).first().textContent({ timeout: 2000 }).catch(() => null);
+                        if (cardCompanyName) break;
+                    }
 
-                    // ランク判定
-                    const rank = await this.classifyRikunabiCard(card, i, 1);
+                    if (cardCompanyName && this.isCompanyMatch(cardCompanyName.trim(), originalName)) {
+                        let title: string | null = null;
+                        const titleSelectors = ['[class*="title"]', '[class*="Title"]', '.rnn-jobTitle'];
+                        for (const sel of titleSelectors) {
+                            title = await card.locator(sel).first().textContent({ timeout: 2000 }).catch(() => null);
+                            if (title) break;
+                        }
 
-                    jobs.push({
-                        title: title?.trim() || '',
-                        company: cardCompanyName.trim(),
-                        rank,
-                        url: url || '',
-                        source: 'rikunabi',
-                    });
+                        const url = await card.getAttribute('href').catch(() => '');
+
+                        // ランク判定
+                        const rank = await this.classifyRikunabiCard(card, i, 1);
+
+                        jobs.push({
+                            title: title?.trim() || '',
+                            company: cardCompanyName.trim(),
+                            rank,
+                            url: url || '',
+                            source: 'rikunabi',
+                        });
+                    }
+                } catch {
+                    // 個別カードのエラーは無視
                 }
             }
 
@@ -347,6 +413,8 @@ export class UpdateEngine {
         } catch (error: any) {
             log(`[Rikunabi] エラー: ${error.message}`);
             return [];
+        } finally {
+            await page.close();
         }
     }
 
@@ -384,11 +452,15 @@ export class UpdateEngine {
     // dodaのランク判定
     private async classifyDodaCard(card: Locator, displayIndex: number): Promise<BudgetRank> {
         try {
-            const linkEl = card.locator('a.jobCard-header__link').first();
-            const href = await linkEl.getAttribute('href');
-            const isPR = href?.includes('-tab__pr/') ?? false;
+            // PR枠かどうかを複数の方法で判定
+            const linkEl = card.locator('a[href*="/job/"]').first();
+            const href = await linkEl.getAttribute('href').catch(() => '');
+            const isPR = href?.includes('-tab__pr/') || href?.includes('/pr/') || false;
 
-            if (isPR) {
+            // PRラベルの有無も確認
+            const hasPRLabel = await card.locator('[class*="pr"], [class*="PR"], [class*="premium"]').count() > 0;
+
+            if (isPR || hasPRLabel) {
                 return 'A';
             } else if (displayIndex < 20) {
                 return 'B';
