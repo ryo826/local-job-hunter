@@ -284,7 +284,7 @@ export class DodaStrategy implements ScrapingStrategy {
 
         let hasNext = true;
         let pageNum = 0;
-        const maxPages = 10;
+        const maxPages = 500;  // 制限を緩和
 
         while (hasNext && pageNum < maxPages) {
             pageNum++;
@@ -546,7 +546,7 @@ export class DodaStrategy implements ScrapingStrategy {
 
             let hasNext = true;
             let pageNum = 0;
-            const maxPages = 10;
+            const maxPages = 500;  // 制限を緩和（実質無制限）
 
             while (hasNext && pageNum < maxPages) {
                 pageNum++;
@@ -617,8 +617,8 @@ export class DodaStrategy implements ScrapingStrategy {
         try {
             logFn(`Visiting: ${jobInfo.companyName}`);
 
-            await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 20000 });
-            await page.waitForTimeout(randomDelay(1500, 2500));
+            await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+            await page.waitForTimeout(randomDelay(500, 1000));
 
             // 404チェック
             const is404 = await page.locator('text=/404|ページが見つかりません/i').count() > 0;
@@ -637,22 +637,22 @@ export class DodaStrategy implements ScrapingStrategy {
                 }
                 jobDetailUrl = jobDetailUrl.replace(/\/+/g, '/').replace(':/', '://');
 
-                await page.goto(jobDetailUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
-                await page.waitForTimeout(randomDelay(1000, 2000));
+                await page.goto(jobDetailUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+                await page.waitForTimeout(randomDelay(300, 700));
             }
 
-            // スクロールして会社概要を読み込み
+            // スクロールして会社概要を読み込み（高速化）
             await page.evaluate(async () => {
-                const scrollStep = 800;
+                const scrollStep = 1500;
                 let currentPosition = 0;
                 const maxScroll = document.body.scrollHeight;
                 while (currentPosition < maxScroll) {
                     currentPosition += scrollStep;
                     window.scrollTo(0, currentPosition);
-                    await new Promise(resolve => setTimeout(resolve, 100));
+                    await new Promise(resolve => setTimeout(resolve, 30));
                 }
             });
-            await page.waitForTimeout(1000);
+            await page.waitForTimeout(300);
 
             // 企業情報を抽出
             const companyUrl = await this.extractCompanyUrl(page, logFn);

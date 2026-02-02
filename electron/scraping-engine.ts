@@ -11,7 +11,7 @@ import path from 'path';
 import { app } from 'electron';
 
 // 並列処理の設定
-const PARALLEL_WORKERS = 5;  // 同時に処理するジョブ数
+const PARALLEL_WORKERS = 10;  // 同時に処理するジョブ数（増加）
 const PARALLEL_SOURCES = true;  // 複数サイトを同時にスクレイピング
 
 export interface ScrapingProgress {
@@ -278,17 +278,24 @@ export class ScrapingEngine {
         const scrapeStartTime = Date.now();
 
         // 並列スクレイピングをサポートするか確認
-        const supportsParallel = typeof strategy.collectJobUrls === 'function' &&
-            typeof strategy.scrapeJobDetail === 'function';
+        const hasCollectJobUrls = typeof strategy.collectJobUrls === 'function';
+        const hasScrapeJobDetail = typeof strategy.scrapeJobDetail === 'function';
+        const supportsParallel = hasCollectJobUrls && hasScrapeJobDetail;
+
+        log(`並列モード判定: collectJobUrls=${hasCollectJobUrls}, scrapeJobDetail=${hasScrapeJobDetail}`);
 
         if (supportsParallel) {
             log(`並列スクレイピングモード (${PARALLEL_WORKERS}ページ同時)`);
-            await this.scrapeSourceParallel(strategy, params, options, onProgress, log);
-            return;
+            try {
+                await this.scrapeSourceParallel(strategy, params, options, onProgress, log);
+                return;
+            } catch (parallelError: any) {
+                log(`並列モードでエラー発生、順次モードにフォールバック: ${parallelError.message}`);
+            }
         }
 
         // フォールバック: 従来の順次スクレイピング
-        log('順次スクレイピングモード (フォールバック)');
+        log('順次スクレイピングモード');
 
         // メインコンテキストを作成
         const context = await this.browser.newContext({
