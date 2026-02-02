@@ -753,14 +753,6 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
                             停止
                         </Button>
                     )}
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="rounded-xl"
-                        onClick={() => fetchCompanies()}
-                    >
-                        <RefreshCw className="h-4 w-4" />
-                    </Button>
                 </div>
             </div>
 
