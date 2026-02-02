@@ -22,6 +22,35 @@ export interface ScrapingProgress {
     startTime?: number;          // スクレイピング開始時刻
 }
 
+// 給与テキストから最大年収（万円）を抽出
+function parseSalary(salaryText: string | undefined | null): number | null {
+    if (!salaryText) return null;
+    // 様々なパターン: "400万円～600万円", "年収450万円以上", "月給25万円"など
+    const yearlyMatch = salaryText.match(/(\d{3,4})万円/g);
+    if (yearlyMatch) {
+        // 最大の数値を取得
+        const values = yearlyMatch.map(m => parseInt(m.replace('万円', '')));
+        return Math.max(...values);
+    }
+    // 月給の場合は年換算（×12 + ボーナス2ヶ月想定）
+    const monthlyMatch = salaryText.match(/月給\s*(\d+)万円/);
+    if (monthlyMatch) {
+        return parseInt(monthlyMatch[1]) * 14; // 月給 × 14ヶ月
+    }
+    return null;
+}
+
+// 従業員数テキストから数値を抽出
+function parseEmployees(employeesText: string | undefined | null): number | null {
+    if (!employeesText) return null;
+    // "100人", "1,000名", "約500人"などのパターン
+    const match = employeesText.replace(/,/g, '').match(/(\d+)/);
+    if (match) {
+        return parseInt(match[1]);
+    }
+    return null;
+}
+
 export class ScrapingEngine {
     private browser: Browser | null = null;
     private isRunning = false;
@@ -41,7 +70,17 @@ export class ScrapingEngine {
     }
 
     async start(
-        options: { sources: string[]; keywords?: string; location?: string; prefectures?: string[]; jobTypes?: string[]; rankFilter?: BudgetRank[] },
+        options: {
+            sources: string[];
+            keywords?: string;
+            location?: string;
+            prefectures?: string[];
+            jobTypes?: string[];
+            rankFilter?: BudgetRank[];
+            minSalary?: number;      // 年収下限（万円）
+            minEmployees?: number;   // 企業規模下限（人）
+            maxJobUpdatedDays?: number;  // 求人更新日から何日以内
+        },
         onProgress: (progress: ScrapingProgress) => void,
         onLog?: (message: string) => void
     ): Promise<{ success: boolean; error?: string }> {
@@ -135,28 +174,62 @@ export class ScrapingEngine {
                         current++;
                         jobsFound++;
 
+                        // 進捗更新ヘルパー
+                        const updateProgressAndSkip = (reason: string): boolean => {
+                            log(`${reason}: ${company.company_name}`);
+                            const elapsedMs = Date.now() - scrapeStartTime;
+                            const avgTimePerJob = current > 0 ? elapsedMs / current : 10000;
+                            const remainingJobs = totalJobs ? Math.max(0, totalJobs - current) : 0;
+                            const estimatedMinutes = totalJobs
+                                ? Math.ceil((remainingJobs * avgTimePerJob) / 60000)
+                                : undefined;
+                            onProgress({
+                                current,
+                                total: totalJobs ?? current,
+                                newCount,
+                                duplicateCount,
+                                source: strategy.source,
+                                status: 'スクレイピング中...',
+                                totalJobs,
+                                estimatedMinutes,
+                                startTime: scrapeStartTime,
+                            });
+                            return true;
+                        };
+
                         // ランクフィルター: 指定されたランクのみを保存
                         if (options.rankFilter && options.rankFilter.length > 0) {
                             if (!company.budget_rank || !options.rankFilter.includes(company.budget_rank)) {
-                                log(`ランクフィルターでスキップ: ${company.company_name} (Rank ${company.budget_rank || '未判定'})`);
-                                const elapsedMs = Date.now() - scrapeStartTime;
-                                const avgTimePerJob = current > 0 ? elapsedMs / current : 10000;
-                                const remainingJobs = totalJobs ? Math.max(0, totalJobs - current) : 0;
-                                const estimatedMinutes = totalJobs
-                                    ? Math.ceil((remainingJobs * avgTimePerJob) / 60000)
-                                    : undefined;
+                                updateProgressAndSkip(`ランクフィルターでスキップ (Rank ${company.budget_rank || '未判定'})`);
+                                continue;
+                            }
+                        }
 
-                                onProgress({
-                                    current,
-                                    total: totalJobs ?? current,
-                                    newCount,
-                                    duplicateCount,
-                                    source: strategy.source,
-                                    status: 'スクレイピング中...',
-                                    totalJobs,
-                                    estimatedMinutes,
-                                    startTime: scrapeStartTime,
-                                });
+                        // 給与フィルター: 指定された年収以上のみを保存
+                        if (options.minSalary) {
+                            const salary = parseSalary(company.salary_text);
+                            if (salary === null || salary < options.minSalary) {
+                                updateProgressAndSkip(`給与フィルターでスキップ (${salary ? salary + '万円' : '不明'})`);
+                                continue;
+                            }
+                        }
+
+                        // 企業規模フィルター: 指定された従業員数以上のみを保存
+                        if (options.minEmployees) {
+                            const employees = parseEmployees(company.employees);
+                            if (employees === null || employees < options.minEmployees) {
+                                updateProgressAndSkip(`企業規模フィルターでスキップ (${employees ? employees + '人' : '不明'})`);
+                                continue;
+                            }
+                        }
+
+                        // 求人更新日フィルター: 指定日数以内に更新されたもののみを保存
+                        if (options.maxJobUpdatedDays && company.job_page_updated_at) {
+                            const updatedAt = new Date(company.job_page_updated_at);
+                            const now = new Date();
+                            const daysDiff = Math.floor((now.getTime() - updatedAt.getTime()) / (1000 * 60 * 60 * 24));
+                            if (daysDiff > options.maxJobUpdatedDays) {
+                                updateProgressAndSkip(`更新日フィルターでスキップ (${daysDiff}日前)`);
                                 continue;
                             }
                         }

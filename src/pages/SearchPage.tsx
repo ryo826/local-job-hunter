@@ -6,12 +6,19 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
+import {
     Dialog,
     DialogContent,
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
-import { MapPin, Briefcase, ChevronRight, X, Play, Square, Clock, TrendingUp, CheckCircle2, Star } from 'lucide-react';
+import { MapPin, Briefcase, ChevronRight, X, Play, Square, Clock, TrendingUp, CheckCircle2, Star, Users, Calendar, Banknote } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { cn } from '@/lib/utils';
 import type { BudgetRank } from '@/types';
@@ -53,6 +60,38 @@ const jobTypeCategories = [
     { id: 'creative', name: 'クリエイティブ・マスコミ', icon: '🎨' },
     { id: 'education', name: '教育・保育', icon: '📚' },
     { id: 'other', name: 'その他', icon: '📋' },
+];
+
+// 給与フィルターオプション
+const salaryOptions = [
+    { value: 'all', label: '指定なし' },
+    { value: '300', label: '300万円以上' },
+    { value: '400', label: '400万円以上' },
+    { value: '500', label: '500万円以上' },
+    { value: '600', label: '600万円以上' },
+    { value: '700', label: '700万円以上' },
+    { value: '800', label: '800万円以上' },
+    { value: '1000', label: '1,000万円以上' },
+];
+
+// 企業規模フィルターオプション
+const employeeOptions = [
+    { value: 'all', label: '指定なし' },
+    { value: '10', label: '10人以上' },
+    { value: '50', label: '50人以上' },
+    { value: '100', label: '100人以上' },
+    { value: '300', label: '300人以上' },
+    { value: '500', label: '500人以上' },
+    { value: '1000', label: '1,000人以上' },
+];
+
+// 求人更新日フィルターオプション
+const jobUpdatedOptions = [
+    { value: 'all', label: '指定なし' },
+    { value: '3', label: '3日以内' },
+    { value: '7', label: '1週間以内' },
+    { value: '14', label: '2週間以内' },
+    { value: '30', label: '1ヶ月以内' },
 ];
 
 // サイト情報
@@ -107,6 +146,11 @@ export function SearchPage() {
 
     // ランクフィルター（チェックされたランクのみ保存）
     const [selectedRanks, setSelectedRanks] = useState<Set<BudgetRank>>(new Set(['A', 'B', 'C']));
+
+    // 追加フィルター
+    const [salaryFilter, setSalaryFilter] = useState('all');
+    const [employeesFilter, setEmployeesFilter] = useState('all');
+    const [jobUpdatedFilter, setJobUpdatedFilter] = useState('all');
 
     // Listen for scraper logs and output to console
     useEffect(() => {
@@ -229,6 +273,10 @@ export function SearchPage() {
             jobTypes: selectedJobTypeNames.length > 0 ? selectedJobTypeNames : undefined,
             // 全て選択されている場合はフィルターなし、一部のみの場合は選択されたランクのみ
             rankFilter: selectedRanks.size < 3 ? Array.from(selectedRanks) : undefined,
+            // 追加フィルター
+            minSalary: salaryFilter !== 'all' ? parseInt(salaryFilter) : undefined,
+            minEmployees: employeesFilter !== 'all' ? parseInt(employeesFilter) : undefined,
+            maxJobUpdatedDays: jobUpdatedFilter !== 'all' ? parseInt(jobUpdatedFilter) : undefined,
         });
     };
 
@@ -524,6 +572,86 @@ export function SearchPage() {
                             </p>
                         )}
                     </div>
+
+                    {/* 追加フィルター（給与・規模・更新日） */}
+                    <div className="grid grid-cols-3 gap-4 pt-2 border-t border-border mt-4">
+                        {/* 給与フィルター */}
+                        <div>
+                            <label className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
+                                <Banknote className="h-4 w-4 text-green-500" />
+                                年収下限
+                            </label>
+                            <Select
+                                value={salaryFilter}
+                                onValueChange={setSalaryFilter}
+                                disabled={isScrapingRunning}
+                            >
+                                <SelectTrigger className="h-10 rounded-xl">
+                                    <SelectValue placeholder="指定なし" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {salaryOptions.map(opt => (
+                                        <SelectItem key={opt.value} value={opt.value}>
+                                            {opt.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {/* 企業規模フィルター */}
+                        <div>
+                            <label className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
+                                <Users className="h-4 w-4 text-blue-500" />
+                                企業規模
+                            </label>
+                            <Select
+                                value={employeesFilter}
+                                onValueChange={setEmployeesFilter}
+                                disabled={isScrapingRunning}
+                            >
+                                <SelectTrigger className="h-10 rounded-xl">
+                                    <SelectValue placeholder="指定なし" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {employeeOptions.map(opt => (
+                                        <SelectItem key={opt.value} value={opt.value}>
+                                            {opt.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {/* 求人更新日フィルター */}
+                        <div>
+                            <label className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
+                                <Calendar className="h-4 w-4 text-orange-500" />
+                                更新日
+                            </label>
+                            <Select
+                                value={jobUpdatedFilter}
+                                onValueChange={setJobUpdatedFilter}
+                                disabled={isScrapingRunning}
+                            >
+                                <SelectTrigger className="h-10 rounded-xl">
+                                    <SelectValue placeholder="指定なし" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {jobUpdatedOptions.map(opt => (
+                                        <SelectItem key={opt.value} value={opt.value}>
+                                            {opt.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                    {(salaryFilter !== 'all' || employeesFilter !== 'all' || jobUpdatedFilter !== 'all') && (
+                        <p className="text-xs text-muted-foreground mt-2">
+                            ※ フィルター条件に合わない求人はスクレイピング時にスキップされます
+                        </p>
+                    )}
                 </div>
             </Card>
 
