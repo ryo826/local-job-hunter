@@ -282,20 +282,36 @@ export class ScrapingEngine {
         const hasScrapeJobDetail = typeof strategy.scrapeJobDetail === 'function';
         const supportsParallel = hasCollectJobUrls && hasScrapeJobDetail;
 
-        log(`並列モード判定: collectJobUrls=${hasCollectJobUrls}, scrapeJobDetail=${hasScrapeJobDetail}`);
+        log(`===== 並列モード診断 =====`);
+        log(`strategy.source: ${strategy.source}`);
+        log(`typeof strategy.collectJobUrls: ${typeof strategy.collectJobUrls}`);
+        log(`typeof strategy.scrapeJobDetail: ${typeof strategy.scrapeJobDetail}`);
+        log(`supportsParallel: ${supportsParallel}`);
+        log(`strategy constructor: ${strategy.constructor?.name}`);
+
+        // プロトタイプチェーンのメソッドを確認
+        const proto = Object.getPrototypeOf(strategy);
+        const protoMethods = Object.getOwnPropertyNames(proto);
+        log(`prototype methods: ${protoMethods.join(', ')}`);
+        log(`===========================`);
 
         if (supportsParallel) {
-            log(`並列スクレイピングモード (${PARALLEL_WORKERS}ページ同時)`);
+            log(`並列スクレイピングモード開始 (${PARALLEL_WORKERS}ページ同時)`);
             try {
                 await this.scrapeSourceParallel(strategy, params, options, onProgress, log);
+                log(`並列スクレイピング完了`);
                 return;
             } catch (parallelError: any) {
-                log(`並列モードでエラー発生、順次モードにフォールバック: ${parallelError.message}`);
+                log(`並列モードでエラー発生: ${parallelError.message}`);
+                log(`エラースタック: ${parallelError.stack}`);
+                log(`順次モードにフォールバック`);
             }
+        } else {
+            log(`並列モード無効 - 順次モードで実行`);
         }
 
         // フォールバック: 従来の順次スクレイピング
-        log('順次スクレイピングモード');
+        log('順次スクレイピングモード開始');
 
         // メインコンテキストを作成
         const context = await this.browser.newContext({
