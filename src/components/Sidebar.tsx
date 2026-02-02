@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Search, Table2, Target, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { Home, Search, Table2, Target, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -30,19 +30,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 flex-shrink-0">
                         <Target className="h-5 w-5 text-primary" />
                     </div>
-                    <div className="overflow-hidden">
+                    <div className="overflow-hidden flex-1">
                         <h1 className="text-base font-bold text-foreground whitespace-nowrap">Job Hunter</h1>
                     </div>
-                    {/* Close button inside sidebar */}
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="ml-auto h-8 w-8 rounded-lg hover:bg-accent flex-shrink-0"
-                        onClick={onToggle}
-                        title="サイドバーを閉じる"
-                    >
-                        <PanelLeftClose className="h-4 w-4" />
-                    </Button>
                 </div>
 
                 {/* Navigation */}
@@ -80,18 +70,22 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 </div>
             </div>
 
-            {/* Toggle button when sidebar is collapsed */}
+            {/* Toggle button - always visible on the edge */}
             <Button
-                variant="ghost"
+                variant="outline"
                 size="icon"
                 className={cn(
-                    'fixed top-4 left-4 h-10 w-10 rounded-xl bg-card border border-border shadow-sm hover:bg-accent z-50 transition-all duration-300',
-                    collapsed ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-full pointer-events-none'
+                    'fixed top-1/2 -translate-y-1/2 h-12 w-6 rounded-r-lg rounded-l-none border-l-0 bg-card hover:bg-accent z-50 transition-all duration-300 shadow-md',
+                    collapsed ? 'left-0' : 'left-64'
                 )}
                 onClick={onToggle}
-                title="サイドバーを開く"
+                title={collapsed ? 'サイドバーを開く' : 'サイドバーを閉じる'}
             >
-                <PanelLeft className="h-5 w-5" />
+                {collapsed ? (
+                    <ChevronRight className="h-4 w-4" />
+                ) : (
+                    <ChevronLeft className="h-4 w-4" />
+                )}
             </Button>
         </>
     );
