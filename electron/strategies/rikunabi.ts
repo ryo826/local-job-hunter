@@ -1,5 +1,5 @@
 import { Page, Locator } from 'playwright';
-import { ScrapingStrategy, CompanyData, ScrapingParams, ScrapingCallbacks, BudgetRank } from './ScrapingStrategy';
+import { ScrapingStrategy, CompanyData, ScrapingParams, ScrapingCallbacks, BudgetRank, JobCardInfo } from './ScrapingStrategy';
 import { normalizeIndustry, normalizeArea, normalizeSalary, normalizeEmployees } from '../utils/data-normalizer';
 
 // ランダム待機時間のヘルパー関数
@@ -320,7 +320,7 @@ export class RikunabiStrategy implements ScrapingStrategy {
 
         let hasNext = true;
         let pageNum = 0;
-        const maxPages = 5;
+        const maxPages = 500;  // 制限を緩和
 
         while (hasNext && pageNum < maxPages) {
             pageNum++;
@@ -749,6 +749,190 @@ export class RikunabiStrategy implements ScrapingStrategy {
         } catch (error) {
             console.error('Failed to get total job count:', error);
             return undefined;
+        }
+    }
+
+    // 並列スクレイピング用: リストページから求人URLを一括収集
+    async collectJobUrls(page: Page, params: ScrapingParams, callbacks?: ScrapingCallbacks): Promise<JobCardInfo[]> {
+        const { onLog, onTotalCount } = callbacks || {};
+        const log = (msg: string) => onLog ? onLog(msg) : console.log(`[Rikunabi] ${msg}`);
+
+        const searchUrl = this.buildSearchUrl(params);
+        log(`Collecting job URLs from: ${searchUrl}`);
+
+        const allJobs: JobCardInfo[] = [];
+
+        try {
+            await page.addInitScript(() => {
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            });
+
+            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.waitForTimeout(randomDelay(2000, 3000));
+
+            // 総件数を取得
+            if (onTotalCount) {
+                const countElement = page.locator('.styles_bodyText__KY7__, [class*="styles_bodyText"]').first();
+                if (await countElement.count() > 0) {
+                    const text = await countElement.textContent();
+                    if (text) {
+                        const match = text.match(/([0-9,]+)/);
+                        if (match) {
+                            const num = parseInt(match[1].replace(/,/g, ''), 10);
+                            if (!isNaN(num)) {
+                                log(`Total jobs: ${num}`);
+                                onTotalCount(num);
+                            }
+                        }
+                    }
+                }
+            }
+
+            let hasNext = true;
+            let pageNum = 0;
+            const maxPages = 500;
+
+            while (hasNext && pageNum < maxPages) {
+                pageNum++;
+                log(`Collecting URLs from page ${pageNum}...`);
+
+                const jobCards = await page.locator('a[class*="styles_bigCard"]').all();
+                log(`Found ${jobCards.length} job cards on page ${pageNum}`);
+
+                if (jobCards.length === 0) break;
+
+                for (let i = 0; i < jobCards.length; i++) {
+                    try {
+                        const card = jobCards[i];
+                        const href = await card.getAttribute('href');
+                        if (!href || !href.includes('/viewjob/')) continue;
+
+                        const fullUrl = href.startsWith('http') ? href : `https://next.rikunabi.com${href}`;
+
+                        // ランク判定
+                        const hasJobFlair = await card.locator('[class*="flair"], [class*="premium"]').count() > 0;
+                        const absoluteIndex = (pageNum - 1) * 100 + i;
+                        const rank: BudgetRank = hasJobFlair ? 'A' : (absoluteIndex < 100 ? 'B' : 'C');
+
+                        // 会社名を取得（カードから）
+                        let companyName = '';
+                        const companyEl = card.locator('[class*="styles_employerName"], [class*="companyName"]').first();
+                        if (await companyEl.count() > 0) {
+                            companyName = (await companyEl.textContent())?.trim() || '';
+                        }
+
+                        // 求人タイトルを取得
+                        let jobTitle = '';
+                        const titleEl = card.locator('[class*="styles_heading"], h2, h3').first();
+                        if (await titleEl.count() > 0) {
+                            jobTitle = (await titleEl.textContent())?.trim() || '';
+                        }
+
+                        allJobs.push({
+                            url: fullUrl,
+                            companyName,
+                            jobTitle,
+                            rank,
+                            displayIndex: absoluteIndex,
+                        });
+                    } catch (err) {
+                        // 個別エラーは無視
+                    }
+                }
+
+                // 次のページへ
+                const nextButton = page.locator('a[aria-label="次へ"]').first();
+                if (await nextButton.count() > 0) {
+                    const isDisabled = await nextButton.getAttribute('aria-disabled');
+                    if (isDisabled === 'true') {
+                        hasNext = false;
+                    } else {
+                        try {
+                            await nextButton.click();
+                            await page.waitForTimeout(randomDelay(2000, 3000));
+                        } catch (error) {
+                            hasNext = false;
+                        }
+                    }
+                } else {
+                    hasNext = false;
+                }
+            }
+
+            log(`Collected ${allJobs.length} job URLs from ${pageNum} pages`);
+            return allJobs;
+
+        } catch (error: any) {
+            log(`Error collecting URLs: ${error.message}`);
+            return allJobs;
+        }
+    }
+
+    // 並列スクレイピング用: 個別の詳細ページをスクレイピング
+    async scrapeJobDetail(page: Page, jobInfo: JobCardInfo, log?: (msg: string) => void): Promise<CompanyData | null> {
+        const logFn = log || ((msg: string) => console.log(`[Rikunabi] ${msg}`));
+
+        try {
+            logFn(`Visiting: ${jobInfo.companyName || jobInfo.url}`);
+
+            await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+            await page.waitForTimeout(randomDelay(500, 1000));
+
+            // 求人タイトルを取得
+            let jobTitle = jobInfo.jobTitle;
+            if (!jobTitle) {
+                const titleEl = page.locator('h1[class*="styles_heading"], h2[class*="styles_title"]').first();
+                if (await titleEl.count() > 0) {
+                    jobTitle = (await titleEl.textContent())?.trim() || '';
+                }
+            }
+
+            // 会社名を取得
+            let companyName = jobInfo.companyName;
+            if (!companyName) {
+                const companyLinkEl = page.locator('a[class*="styles_linkTextCompany"]').first();
+                if (await companyLinkEl.count() > 0) {
+                    companyName = (await companyLinkEl.textContent())?.trim() || '';
+                }
+            }
+
+            if (!companyName) {
+                logFn('No company name found, skipping');
+                return null;
+            }
+
+            // 募集要項と企業情報を抽出
+            const jobDetails = await this.extractJobDetails(page, logFn);
+            const companyInfo = await this.extractCompanyInfo(page, logFn);
+
+            const address = companyInfo['本社所在地'] || jobDetails['勤務地'] || '';
+            const normalizedAddress = this.normalizeAddress(address);
+            const cleanName = this.cleanCompanyName(companyName);
+            const homepageUrl = companyInfo['企業HP'] || companyInfo['ホームページ'] || companyInfo['HP'] || '';
+
+            return {
+                source: this.source,
+                url: jobInfo.url,
+                company_name: cleanName,
+                job_title: jobTitle,
+                salary_text: normalizeSalary(jobDetails['給与']),
+                representative: companyInfo['代表者'] || '',
+                establishment: companyInfo['設立'] || '',
+                employees: normalizeEmployees(companyInfo['従業員数']),
+                revenue: companyInfo['売上高'] || '',
+                phone: companyInfo['企業代表番号'] || '',
+                address: normalizedAddress,
+                area: normalizeArea(this.extractAreaFromAddress(normalizedAddress)),
+                homepage_url: homepageUrl,
+                industry: normalizeIndustry(companyInfo['事業内容']),
+                scrape_status: 'step1_completed',
+                budget_rank: jobInfo.rank,
+                rank_confidence: jobInfo.rank === 'A' ? 0.9 : (jobInfo.rank === 'B' ? 0.7 : 0.6),
+                job_page_updated_at: (await extractRikunabiJobDate(page))?.toISOString() || null,
+            };
+        } catch (error: any) {
+            logFn(`Error scraping ${jobInfo.companyName}: ${error.message}`);
+            return null;
         }
     }
 }
