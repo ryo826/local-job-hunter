@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -37,6 +37,7 @@ import {
     MapPin,
     Briefcase,
     X,
+    RotateCcw,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import type { Company, BudgetRank } from '@/types';
@@ -71,7 +72,7 @@ const rankConfig: Record<BudgetRank, { label: string; className: string }> = {
 };
 
 // Sort types
-type SortColumn = 'industry' | 'area' | 'salary' | 'employees' | 'source' | null;
+type SortColumn = 'industry' | 'area' | 'salary' | 'employees' | 'source' | 'jobPageUpdated' | 'lastFetched' | 'status' | null;
 type SortDirection = 'asc' | 'desc';
 
 // Filter tab options
@@ -210,7 +211,6 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
     } = useAppStore();
 
     const [searchQuery, setSearchQuery] = useState(filters.search || '');
-    const [statusFilter, setStatusFilter] = useState(filters.status || 'all');
     const [selectedRegions, setSelectedRegions] = useState<Set<string>>(new Set());
     const [selectedJobTypes, setSelectedJobTypes] = useState<Set<string>>(new Set());
     const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
@@ -219,6 +219,10 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
     const [isExporting, setIsExporting] = useState(false);
     const [activeFilterTab, setActiveFilterTab] = useState<FilterTab>('勤務地');
     const [isFilterExpanded, setIsFilterExpanded] = useState(false);
+
+    // Refs for click outside detection
+    const detailPanelRef = useRef<HTMLDivElement>(null);
+    const filterPanelRef = useRef<HTMLDivElement>(null);
 
     // Phone enrichment state
     const [isEnriching, setIsEnriching] = useState(false);
@@ -239,6 +243,9 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
     const [employeesFilter, setEmployeesFilter] = useState<string>('all');
     const [sourceFilter, setSourceFilter] = useState<string>('all');
     const [rankFilter, setRankFilter] = useState<string>('all');
+    const [statusFilter, setStatusFilter] = useState<string>('all');
+    const [jobPageUpdatedFilter, setJobPageUpdatedFilter] = useState<string>('all');
+    const [lastFetchedFilter, setLastFetchedFilter] = useState<string>('all');
 
     // Sorting state
     const [sortColumn, setSortColumn] = useState<SortColumn>(null);
@@ -248,6 +255,37 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
         fetchCompanies();
         loadEnrichStats();
     }, []);
+
+    // Click outside handler for detail panel
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (isDetailOpen && detailPanelRef.current && !detailPanelRef.current.contains(event.target as Node)) {
+                // Check if click is on a button that opens detail (Eye icon)
+                const target = event.target as HTMLElement;
+                if (!target.closest('[data-detail-trigger]')) {
+                    setIsDetailOpen(false);
+                }
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isDetailOpen]);
+
+    // Click outside handler for filter panel
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (isFilterExpanded && filterPanelRef.current && !filterPanelRef.current.contains(event.target as Node)) {
+                const target = event.target as HTMLElement;
+                if (!target.closest('[data-filter-trigger]')) {
+                    setIsFilterExpanded(false);
+                }
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isFilterExpanded]);
 
     // Load phone enrichment stats
     const loadEnrichStats = async () => {
@@ -290,11 +328,10 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
         const timer = setTimeout(() => {
             setFilters({
                 search: searchQuery || undefined,
-                status: statusFilter !== 'all' ? statusFilter : undefined,
             });
         }, 300);
         return () => clearTimeout(timer);
-    }, [searchQuery, statusFilter]);
+    }, [searchQuery]);
 
     // Handle CSV export
     const handleExport = async () => {
@@ -339,6 +376,23 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
         } finally {
             setIsDeleting(false);
         }
+    };
+
+    // Reset all filters
+    const resetAllFilters = () => {
+        setSelectedRegions(new Set());
+        setSelectedJobTypes(new Set());
+        setIndustryFilter('all');
+        setAreaFilter('all');
+        setSalaryFilter('all');
+        setEmployeesFilter('all');
+        setSourceFilter('all');
+        setRankFilter('all');
+        setStatusFilter('all');
+        setJobPageUpdatedFilter('all');
+        setLastFetchedFilter('all');
+        setSortColumn(null);
+        setSortDirection('asc');
     };
 
     // Toggle checkbox selection
@@ -387,6 +441,8 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
             sources: Array.from(sources).sort(),
             salaryRanges: ['300万未満', '300-500万', '500-700万', '700-1000万', '1000万以上'],
             employeeRanges: ['10人未満', '10-50人', '50-100人', '100-500人', '500人以上'],
+            jobPageUpdatedRanges: ['3日以内', '7日以内', '14日以内', '14日以上'],
+            lastFetchedRanges: ['今日', '3日以内', '7日以内', '7日以上'],
         };
     }, [companies]);
 
@@ -428,6 +484,34 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
             case '50-100人': return employees >= 50 && employees < 100;
             case '100-500人': return employees >= 100 && employees < 500;
             case '500人以上': return employees >= 500;
+            default: return true;
+        }
+    };
+
+    // Check if job page updated matches filter
+    const matchesJobPageUpdatedFilter = (dateStr: string | null, filter: string): boolean => {
+        if (filter === 'all') return true;
+        if (!dateStr) return filter === '14日以上';
+        const { daysAgo } = formatJobPageUpdated(dateStr);
+        switch (filter) {
+            case '3日以内': return daysAgo >= 0 && daysAgo <= 3;
+            case '7日以内': return daysAgo >= 0 && daysAgo <= 7;
+            case '14日以内': return daysAgo >= 0 && daysAgo <= 14;
+            case '14日以上': return daysAgo < 0 || daysAgo > 14;
+            default: return true;
+        }
+    };
+
+    // Check if last fetched matches filter
+    const matchesLastFetchedFilter = (dateStr: string | null, filter: string): boolean => {
+        if (filter === 'all') return true;
+        if (!dateStr) return filter === '7日以上';
+        const { daysAgo } = formatLastFetched(dateStr);
+        switch (filter) {
+            case '今日': return daysAgo === 0;
+            case '3日以内': return daysAgo >= 0 && daysAgo <= 3;
+            case '7日以内': return daysAgo >= 0 && daysAgo <= 7;
+            case '7日以上': return daysAgo < 0 || daysAgo > 7;
             default: return true;
         }
     };
@@ -480,8 +564,10 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
             if (sourceFilter !== 'all' && company.source !== sourceFilter) return false;
             if (!matchesSalaryFilter(company.salary_text, salaryFilter)) return false;
             if (!matchesEmployeesFilter(company.employees, employeesFilter)) return false;
-            // ランクフィルター
             if (rankFilter !== 'all' && company.budget_rank !== rankFilter) return false;
+            if (statusFilter !== 'all' && company.status !== statusFilter) return false;
+            if (!matchesJobPageUpdatedFilter(company.job_page_updated_at, jobPageUpdatedFilter)) return false;
+            if (!matchesLastFetchedFilter(company.last_updated_at || company.created_at, lastFetchedFilter)) return false;
 
             return true;
         });
@@ -513,6 +599,18 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
                         aVal = a.source || '';
                         bVal = b.source || '';
                         break;
+                    case 'jobPageUpdated':
+                        aVal = a.job_page_updated_at ? new Date(a.job_page_updated_at).getTime() : 0;
+                        bVal = b.job_page_updated_at ? new Date(b.job_page_updated_at).getTime() : 0;
+                        break;
+                    case 'lastFetched':
+                        aVal = (a.last_updated_at || a.created_at) ? new Date(a.last_updated_at || a.created_at!).getTime() : 0;
+                        bVal = (b.last_updated_at || b.created_at) ? new Date(b.last_updated_at || b.created_at!).getTime() : 0;
+                        break;
+                    case 'status':
+                        aVal = a.status || '';
+                        bVal = b.status || '';
+                        break;
                 }
 
                 if (typeof aVal === 'number' && typeof bVal === 'number') {
@@ -524,7 +622,7 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
         }
 
         return result;
-    }, [companies, selectedRegions, selectedJobTypes, industryFilter, areaFilter, salaryFilter, employeesFilter, sourceFilter, rankFilter, sortColumn, sortDirection]);
+    }, [companies, selectedRegions, selectedJobTypes, industryFilter, areaFilter, salaryFilter, employeesFilter, sourceFilter, rankFilter, statusFilter, jobPageUpdatedFilter, lastFetchedFilter, sortColumn, sortDirection]);
 
     // Handle sort column click
     const handleSort = (column: SortColumn) => {
@@ -624,7 +722,10 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
         (salaryFilter !== 'all' ? 1 : 0) +
         (employeesFilter !== 'all' ? 1 : 0) +
         (sourceFilter !== 'all' ? 1 : 0) +
-        (rankFilter !== 'all' ? 1 : 0);
+        (rankFilter !== 'all' ? 1 : 0) +
+        (statusFilter !== 'all' ? 1 : 0) +
+        (jobPageUpdatedFilter !== 'all' ? 1 : 0) +
+        (lastFetchedFilter !== 'all' ? 1 : 0);
 
     return (
         <div className="space-y-4">
@@ -767,19 +868,18 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
                         onChange={(e) => setSearchQuery(e.target.value)}
                     />
                 </div>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-32 h-11 rounded-xl">
-                        <SelectValue placeholder="ステータス" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">すべて</SelectItem>
-                        <SelectItem value="new">新規</SelectItem>
-                        <SelectItem value="promising">見込み</SelectItem>
-                        <SelectItem value="meeting">商談中</SelectItem>
-                        <SelectItem value="won">成約</SelectItem>
-                        <SelectItem value="ng">NG</SelectItem>
-                    </SelectContent>
-                </Select>
+                {activeFiltersCount > 0 && (
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-11 rounded-xl text-destructive hover:text-destructive"
+                        onClick={resetAllFilters}
+                        title="フィルターをリセット"
+                    >
+                        <RotateCcw className="h-4 w-4 mr-1.5" />
+                        リセット
+                    </Button>
+                )}
                 <Button
                     variant={isFilterExpanded ? 'default' : 'outline'}
                     className={cn(
@@ -787,6 +887,7 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
                         activeFiltersCount > 0 && !isFilterExpanded && 'border-primary text-primary'
                     )}
                     onClick={() => setIsFilterExpanded(!isFilterExpanded)}
+                    data-filter-trigger
                 >
                     <Filter className="h-4 w-4" />
                     フィルター
@@ -841,7 +942,7 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
 
             {/* Expandable Filter Section */}
             {isFilterExpanded && (
-                <Card className="p-5 rounded-2xl">
+                <Card className="p-5 rounded-2xl" ref={filterPanelRef}>
                     {/* Filter Tabs */}
                     <div className="flex gap-1 mb-4">
                         {(['勤務地', '職種'] as FilterTab[]).map(tab => (
@@ -926,17 +1027,7 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
                                 variant="ghost"
                                 size="sm"
                                 className="text-destructive hover:text-destructive"
-                                onClick={() => {
-                                    setSelectedRegions(new Set());
-                                    setSelectedJobTypes(new Set());
-                                    setIndustryFilter('all');
-                                    setAreaFilter('all');
-                                    setSalaryFilter('all');
-                                    setEmployeesFilter('all');
-                                    setSourceFilter('all');
-                                    setRankFilter('all');
-                                    setSortColumn(null);
-                                }}
+                                onClick={resetAllFilters}
                             >
                                 <X className="h-4 w-4 mr-1" />
                                 すべてクリア
@@ -949,7 +1040,7 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
             {/* Data Table */}
             <Card className="overflow-hidden rounded-2xl">
                 <div className="overflow-auto max-h-[calc(100vh-280px)]">
-                    <table className="w-full text-sm min-w-[1400px]">
+                    <table className="w-full text-sm min-w-[1600px]">
                         <thead className="bg-muted/50 border-b sticky top-0 z-10">
                             <tr>
                                 <th className="p-3 w-10 bg-muted/50">
@@ -968,9 +1059,9 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
                                             </SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="all">全て</SelectItem>
-                                                <SelectItem value="A">A (高予算)</SelectItem>
-                                                <SelectItem value="B">B (中予算)</SelectItem>
-                                                <SelectItem value="C">C (低予算)</SelectItem>
+                                                <SelectItem value="A">A</SelectItem>
+                                                <SelectItem value="B">B</SelectItem>
+                                                <SelectItem value="C">C</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -1085,9 +1176,73 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
                                         </Select>
                                     </div>
                                 </th>
-                                <th className="p-3 text-left font-medium w-[90px] bg-muted/50" title="求人サイト上での情報更新日">求人更新</th>
-                                <th className="p-3 text-left font-medium w-[80px] bg-muted/50" title="このシステムが情報を取得した日時">取得日</th>
-                                <th className="p-3 text-left font-medium w-[90px]">ステータス</th>
+                                <th className="p-2 text-left font-medium w-[100px] bg-muted/50">
+                                    <div className="space-y-1">
+                                        <button
+                                            className="flex items-center hover:text-primary transition-colors"
+                                            onClick={() => handleSort('jobPageUpdated')}
+                                            title="求人サイト上での情報更新日"
+                                        >
+                                            求人更新{getSortIcon('jobPageUpdated')}
+                                        </button>
+                                        <Select value={jobPageUpdatedFilter} onValueChange={setJobPageUpdatedFilter}>
+                                            <SelectTrigger className="h-7 text-xs w-[90px] rounded-lg">
+                                                <SelectValue placeholder="全て" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">全て</SelectItem>
+                                                {filterOptions.jobPageUpdatedRanges.map(opt => (
+                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </th>
+                                <th className="p-2 text-left font-medium w-[90px] bg-muted/50">
+                                    <div className="space-y-1">
+                                        <button
+                                            className="flex items-center hover:text-primary transition-colors"
+                                            onClick={() => handleSort('lastFetched')}
+                                            title="このシステムが情報を取得した日時"
+                                        >
+                                            取得日{getSortIcon('lastFetched')}
+                                        </button>
+                                        <Select value={lastFetchedFilter} onValueChange={setLastFetchedFilter}>
+                                            <SelectTrigger className="h-7 text-xs w-[80px] rounded-lg">
+                                                <SelectValue placeholder="全て" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">全て</SelectItem>
+                                                {filterOptions.lastFetchedRanges.map(opt => (
+                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </th>
+                                <th className="p-2 text-left font-medium w-[100px] bg-muted/50">
+                                    <div className="space-y-1">
+                                        <button
+                                            className="flex items-center hover:text-primary transition-colors"
+                                            onClick={() => handleSort('status')}
+                                        >
+                                            ステータス{getSortIcon('status')}
+                                        </button>
+                                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                                            <SelectTrigger className="h-7 text-xs w-[90px] rounded-lg">
+                                                <SelectValue placeholder="全て" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">全て</SelectItem>
+                                                <SelectItem value="new">新規</SelectItem>
+                                                <SelectItem value="promising">見込み</SelectItem>
+                                                <SelectItem value="meeting">商談中</SelectItem>
+                                                <SelectItem value="won">成約</SelectItem>
+                                                <SelectItem value="ng">NG</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </th>
                             </tr>
                         </thead>
                         <tbody className="divide-y">
@@ -1134,6 +1289,7 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
                                                 className="h-8 w-8 rounded-lg"
                                                 onClick={() => handleViewDetail(company)}
                                                 title="詳細"
+                                                data-detail-trigger
                                             >
                                                 <Eye className="h-4 w-4" />
                                             </Button>
@@ -1207,7 +1363,7 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
                                             {getSourceBadge(company.source)}
                                         </td>
 
-                                        <td className="p-3 w-[90px]">
+                                        <td className="p-3 w-[100px]">
                                             {(() => {
                                                 const jobPageUpdated = formatJobPageUpdated(company.job_page_updated_at);
                                                 return (
@@ -1228,7 +1384,7 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
                                             })()}
                                         </td>
 
-                                        <td className="p-3 w-[80px]">
+                                        <td className="p-3 w-[90px]">
                                             {(() => {
                                                 const lastFetched = formatLastFetched(company.last_updated_at || company.created_at);
                                                 return (
@@ -1411,6 +1567,7 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
 
             {/* Detail Slide Panel */}
             <div
+                ref={detailPanelRef}
                 className={cn(
                     'fixed right-0 bottom-0 h-1/2 bg-background border-t border-border shadow-2xl transition-all duration-300 ease-out z-40',
                     isDetailOpen ? 'translate-y-0' : 'translate-y-full',
