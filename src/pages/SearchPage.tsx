@@ -11,9 +11,17 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
-import { MapPin, Briefcase, ChevronRight, X, Play, Square, Clock, TrendingUp, CheckCircle2 } from 'lucide-react';
+import { MapPin, Briefcase, ChevronRight, X, Play, Square, Clock, TrendingUp, CheckCircle2, Star } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { cn } from '@/lib/utils';
+import type { BudgetRank } from '@/types';
+
+// ランク選択オプション
+const rankOptions: { rank: BudgetRank; label: string; icon: string; color: string }[] = [
+    { rank: 'A', label: '高予算層 (プレミアム枠)', icon: '⭐', color: 'bg-amber-100 dark:bg-amber-900 border-amber-300 dark:border-amber-700' },
+    { rank: 'B', label: '中予算層 (1ページ目)', icon: '🔵', color: 'bg-blue-100 dark:bg-blue-900 border-blue-300 dark:border-blue-700' },
+    { rank: 'C', label: '低予算層 (2ページ目以降)', icon: '⚪', color: 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-600' },
+];
 
 // 地方と都道府県のマッピング
 const regionPrefectures: Record<string, string[]> = {
@@ -97,6 +105,9 @@ export function SearchPage() {
     const [selectedJobTypes, setSelectedJobTypes] = useState<Set<string>>(new Set());
     const [isJobTypeModalOpen, setIsJobTypeModalOpen] = useState(false);
 
+    // ランクフィルター（チェックされたランクのみ保存）
+    const [selectedRanks, setSelectedRanks] = useState<Set<BudgetRank>>(new Set(['A', 'B', 'C']));
+
     // Listen for scraper logs and output to console
     useEffect(() => {
         const handleLog = (message: string) => {
@@ -159,6 +170,22 @@ export function SearchPage() {
         });
     };
 
+    // ランクの選択/解除
+    const toggleRank = (rank: BudgetRank) => {
+        setSelectedRanks(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(rank)) {
+                // 最低1つは選択されている必要がある
+                if (newSet.size > 1) {
+                    newSet.delete(rank);
+                }
+            } else {
+                newSet.add(rank);
+            }
+            return newSet;
+        });
+    };
+
     // 選択された都道府県のサマリー
     const getLocationSummary = () => {
         if (selectedPrefectures.size === 0) return '選択してください';
@@ -200,6 +227,8 @@ export function SearchPage() {
             keywords: keyword || undefined,
             prefectures: selectedPrefectures.size > 0 ? Array.from(selectedPrefectures) : undefined,
             jobTypes: selectedJobTypeNames.length > 0 ? selectedJobTypeNames : undefined,
+            // 全て選択されている場合はフィルターなし、一部のみの場合は選択されたランクのみ
+            rankFilter: selectedRanks.size < 3 ? Array.from(selectedRanks) : undefined,
         });
     };
 
@@ -454,6 +483,45 @@ export function SearchPage() {
                                     </Badge>
                                 )}
                             </div>
+                        )}
+                    </div>
+
+                    {/* ランクフィルター */}
+                    <div>
+                        <label className="text-sm font-medium text-foreground mb-2 block flex items-center gap-2">
+                            <Star className="h-4 w-4 text-amber-500" />
+                            保存対象ランク
+                            <span className="text-xs text-muted-foreground font-normal">(企業の採用予算規模)</span>
+                        </label>
+                        <div className="grid grid-cols-3 gap-2">
+                            {rankOptions.map(option => (
+                                <label
+                                    key={option.rank}
+                                    className={cn(
+                                        'flex items-center gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all',
+                                        selectedRanks.has(option.rank)
+                                            ? `${option.color} border-primary`
+                                            : 'border-border hover:border-muted-foreground/30 opacity-50',
+                                        isScrapingRunning && 'cursor-not-allowed'
+                                    )}
+                                >
+                                    <Checkbox
+                                        checked={selectedRanks.has(option.rank)}
+                                        onCheckedChange={() => toggleRank(option.rank)}
+                                        disabled={isScrapingRunning}
+                                    />
+                                    <span className="text-lg">{option.icon}</span>
+                                    <div className="flex-1">
+                                        <span className="text-sm font-bold">Rank {option.rank}</span>
+                                        <p className="text-xs text-muted-foreground">{option.label}</p>
+                                    </div>
+                                </label>
+                            ))}
+                        </div>
+                        {selectedRanks.size < 3 && (
+                            <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+                                ※ 選択されていないランクの企業はスクレイピング時にスキップされます
+                            </p>
                         )}
                     </div>
                 </div>

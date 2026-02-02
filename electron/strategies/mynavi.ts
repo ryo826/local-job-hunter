@@ -1,11 +1,40 @@
 
-import { Page } from 'playwright';
-import { ScrapingStrategy, CompanyData, ScrapingParams, ScrapingCallbacks } from './ScrapingStrategy';
+import { Page, Locator } from 'playwright';
+import { ScrapingStrategy, CompanyData, ScrapingParams, ScrapingCallbacks, BudgetRank } from './ScrapingStrategy';
 import { normalizeIndustry, normalizeArea, normalizeSalary, normalizeEmployees } from '../utils/data-normalizer';
 
 // ランダム待機時間のヘルパー関数
 function randomDelay(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// ランク判定結果
+interface RankResult {
+    rank: BudgetRank;
+    confidence: number;
+}
+
+// マイナビ転職のランク判定ロジック
+// 優先度: data-ty="rzs" > 注目枠ラベル > ページ番号
+async function classifyMynavi(card: Locator, pageNum: number): Promise<RankResult> {
+    try {
+        // 1. data-ty属性をチェック
+        const dataTy = await card.getAttribute('data-ty');
+
+        // 2. 注目枠ラベルの存在確認
+        const hasAttentionLabel = await card.locator('.cassetteRecruitRecommend__label--attention').count() > 0;
+
+        if (dataTy === 'rzs' || hasAttentionLabel) {
+            return { rank: 'A', confidence: 0.9 };  // プレミアム枠
+        } else if (pageNum === 1) {
+            return { rank: 'B', confidence: 0.7 };  // 1ページ目の通常枠
+        } else {
+            return { rank: 'C', confidence: 0.6 };  // 2ページ目以降
+        }
+    } catch (error) {
+        console.warn(`Rank classification failed: ${error}`);
+        return { rank: 'C', confidence: 0.3 }; // デフォルトで最下位ランク
+    }
 }
 
 // マイナビ都道府県マッピング（エリア + pコード）
@@ -257,9 +286,11 @@ export class MynaviStrategy implements ScrapingStrategy {
             }
 
             // 各カードからURLリストを先に抽出（ページ遷移しても失われないように）
-            const jobUrls: { url: string; companyName: string; jobTitle: string }[] = [];
+            const jobUrls: { url: string; companyName: string; jobTitle: string; rankResult: RankResult }[] = [];
 
             for (const card of jobCards) {
+                // ランク判定
+                const rankResult = await classifyMynavi(card, pageNum);
                 try {
                     // リンクを取得（複数のセレクターを試行）
                     let url: string | null = null;
@@ -334,13 +365,13 @@ export class MynaviStrategy implements ScrapingStrategy {
                         }
                     }
 
-                    jobUrls.push({ url: fullUrl, companyName, jobTitle });
+                    jobUrls.push({ url: fullUrl, companyName, jobTitle, rankResult });
                 } catch (err) {
                     log(`Error extracting job URL from card: ${err}`);
                 }
             }
 
-            log(`Extracted ${jobUrls.length} valid job URLs`);
+            log(`Extracted ${jobUrls.length} valid job URLs (Page ${pageNum})`);
 
             // 各求人詳細ページを訪問
             for (const jobInfo of jobUrls) {
@@ -424,6 +455,9 @@ export class MynaviStrategy implements ScrapingStrategy {
                         industry: normalizeIndustry(industry),
                         job_description: jobDescription,
                         scrape_status: 'step1_completed',
+                        // ランク情報
+                        budget_rank: jobInfo.rankResult.rank,
+                        rank_confidence: jobInfo.rankResult.confidence,
                     };
 
                 } catch (err) {

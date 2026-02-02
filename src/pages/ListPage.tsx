@@ -39,9 +39,32 @@ import {
     X,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
-import type { Company } from '@/types';
+import type { Company, BudgetRank } from '@/types';
 import { formatCompanyData } from '@/utils/companyFormatter';
 import { cn } from '@/lib/utils';
+
+// ランク定義（ツールチップ用）
+const RANK_DEFINITIONS = {
+    A: {
+        label: '高予算層',
+        description: 'プレミアム枠・PR枠・Job Flair等の有料オプション使用',
+    },
+    B: {
+        label: '中予算層',
+        description: '1ページ目表示(上位30〜100件)',
+    },
+    C: {
+        label: '低予算層',
+        description: '2ページ目以降または下位表示',
+    }
+} as const;
+
+// Rank badge config
+const rankConfig: Record<BudgetRank, { label: string; className: string }> = {
+    A: { label: 'A', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300 font-bold' },
+    B: { label: 'B', className: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 font-bold' },
+    C: { label: 'C', className: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 font-bold' },
+};
 
 // Sort types
 type SortColumn = 'industry' | 'area' | 'salary' | 'employees' | 'source' | null;
@@ -132,6 +155,7 @@ export function ListPage() {
     const [salaryFilter, setSalaryFilter] = useState<string>('all');
     const [employeesFilter, setEmployeesFilter] = useState<string>('all');
     const [sourceFilter, setSourceFilter] = useState<string>('all');
+    const [rankFilter, setRankFilter] = useState<string>('all');
 
     // Sorting state
     const [sortColumn, setSortColumn] = useState<SortColumn>(null);
@@ -373,6 +397,8 @@ export function ListPage() {
             if (sourceFilter !== 'all' && company.source !== sourceFilter) return false;
             if (!matchesSalaryFilter(company.salary_text, salaryFilter)) return false;
             if (!matchesEmployeesFilter(company.employees, employeesFilter)) return false;
+            // ランクフィルター
+            if (rankFilter !== 'all' && company.budget_rank !== rankFilter) return false;
 
             return true;
         });
@@ -415,7 +441,7 @@ export function ListPage() {
         }
 
         return result;
-    }, [companies, selectedRegions, selectedJobTypes, industryFilter, areaFilter, salaryFilter, employeesFilter, sourceFilter, sortColumn, sortDirection]);
+    }, [companies, selectedRegions, selectedJobTypes, industryFilter, areaFilter, salaryFilter, employeesFilter, sourceFilter, rankFilter, sortColumn, sortDirection]);
 
     // Handle sort column click
     const handleSort = (column: SortColumn) => {
@@ -480,6 +506,22 @@ export function ListPage() {
         );
     };
 
+    const getRankBadge = (rank: BudgetRank | null) => {
+        if (!rank) {
+            return <span className="text-muted-foreground text-xs">-</span>;
+        }
+        const config = rankConfig[rank];
+        const definition = RANK_DEFINITIONS[rank];
+        return (
+            <span
+                className={cn('px-2 py-0.5 rounded-full text-xs', config.className)}
+                title={definition.description}
+            >
+                {config.label}
+            </span>
+        );
+    };
+
     const handleStatusChange = async (id: number, newStatus: string) => {
         await updateCompany(id, { status: newStatus });
         fetchCompanies();
@@ -498,7 +540,8 @@ export function ListPage() {
         (areaFilter !== 'all' ? 1 : 0) +
         (salaryFilter !== 'all' ? 1 : 0) +
         (employeesFilter !== 'all' ? 1 : 0) +
-        (sourceFilter !== 'all' ? 1 : 0);
+        (sourceFilter !== 'all' ? 1 : 0) +
+        (rankFilter !== 'all' ? 1 : 0);
 
     return (
         <div className="space-y-4">
@@ -732,6 +775,7 @@ export function ListPage() {
                                     setSalaryFilter('all');
                                     setEmployeesFilter('all');
                                     setSourceFilter('all');
+                                    setRankFilter('all');
                                     setSortColumn(null);
                                 }}
                             >
@@ -756,6 +800,22 @@ export function ListPage() {
                                     />
                                 </th>
                                 <th className="p-3 text-left font-medium w-[180px] bg-muted/50">会社名</th>
+                                <th className="p-2 text-left font-medium w-[70px] bg-muted/50">
+                                    <div className="space-y-1">
+                                        <span>ランク</span>
+                                        <Select value={rankFilter} onValueChange={setRankFilter}>
+                                            <SelectTrigger className="h-7 text-xs w-[60px] rounded-lg">
+                                                <SelectValue placeholder="全て" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">全て</SelectItem>
+                                                <SelectItem value="A">A (高予算)</SelectItem>
+                                                <SelectItem value="B">B (中予算)</SelectItem>
+                                                <SelectItem value="C">C (低予算)</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </th>
                                 <th className="p-3 text-left font-medium w-[50px] bg-muted/50">詳細</th>
                                 <th className="p-3 text-left font-medium w-[110px] bg-muted/50">電話番号</th>
                                 <th className="p-3 text-left font-medium w-[60px] bg-muted/50">HP</th>
@@ -900,6 +960,10 @@ export function ListPage() {
                                             >
                                                 {formatted.companyName}
                                             </a>
+                                        </td>
+
+                                        <td className="p-3 text-center">
+                                            {getRankBadge(company.budget_rank)}
                                         </td>
 
                                         <td className="p-3">

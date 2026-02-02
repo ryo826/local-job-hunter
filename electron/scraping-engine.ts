@@ -1,6 +1,6 @@
 import { chromium, Browser, Page } from 'playwright';
 import { companyRepository } from './database';
-import { ScrapingStrategy, ScrapingParams, CompanyData } from './strategies/ScrapingStrategy';
+import { ScrapingStrategy, ScrapingParams, CompanyData, BudgetRank } from './strategies/ScrapingStrategy';
 import { JobRepository } from './repositories/JobRepository';
 import { ScrapingLogRepository } from './repositories/ScrapingLogRepository';
 import { UpsertService } from './services/UpsertService';
@@ -41,7 +41,7 @@ export class ScrapingEngine {
     }
 
     async start(
-        options: { sources: string[]; keywords?: string; location?: string; prefectures?: string[]; jobTypes?: string[] },
+        options: { sources: string[]; keywords?: string; location?: string; prefectures?: string[]; jobTypes?: string[]; rankFilter?: BudgetRank[] },
         onProgress: (progress: ScrapingProgress) => void,
         onLog?: (message: string) => void
     ): Promise<{ success: boolean; error?: string }> {
@@ -134,6 +134,32 @@ export class ScrapingEngine {
                         if (this.shouldStop) break;
                         current++;
                         jobsFound++;
+
+                        // ランクフィルター: 指定されたランクのみを保存
+                        if (options.rankFilter && options.rankFilter.length > 0) {
+                            if (!company.budget_rank || !options.rankFilter.includes(company.budget_rank)) {
+                                log(`ランクフィルターでスキップ: ${company.company_name} (Rank ${company.budget_rank || '未判定'})`);
+                                const elapsedMs = Date.now() - scrapeStartTime;
+                                const avgTimePerJob = current > 0 ? elapsedMs / current : 10000;
+                                const remainingJobs = totalJobs ? Math.max(0, totalJobs - current) : 0;
+                                const estimatedMinutes = totalJobs
+                                    ? Math.ceil((remainingJobs * avgTimePerJob) / 60000)
+                                    : undefined;
+
+                                onProgress({
+                                    current,
+                                    total: totalJobs ?? current,
+                                    newCount,
+                                    duplicateCount,
+                                    source: strategy.source,
+                                    status: 'スクレイピング中...',
+                                    totalJobs,
+                                    estimatedMinutes,
+                                    startTime: scrapeStartTime,
+                                });
+                                continue;
+                            }
+                        }
 
                         // 会社名で重複チェック（B2B営業用：同じ会社の複数求人を1つにまとめる）
                         const existsByName = companyRepository.existsByName(company.company_name);

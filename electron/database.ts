@@ -56,6 +56,10 @@ export function initDB() {
     CREATE INDEX IF NOT EXISTS idx_companies_status ON companies(status);
     CREATE INDEX IF NOT EXISTS idx_companies_scrape_status ON companies(scrape_status);
 
+    -- ランク関連カラムの追加（既存テーブルへのマイグレーション）
+    -- SQLiteではALTER TABLE ADD COLUMNで既存テーブルにカラムを追加可能
+    -- カラムが既に存在する場合はエラーになるため、PRAGMA table_info()でチェック
+
     -- 新規: 求人テーブル(求人情報管理用)
     CREATE TABLE IF NOT EXISTS jobs (
       id TEXT PRIMARY KEY,
@@ -144,6 +148,37 @@ export function initDB() {
       ('rate_limit_ms', '2500', datetime('now')),
       ('max_concurrent', '1', datetime('now'));
   `);
+
+    // ランク関連カラムのマイグレーション
+    migrateRankColumns(database);
+}
+
+// ランク関連カラムを既存テーブルに追加するマイグレーション
+function migrateRankColumns(database: Database.Database) {
+    // テーブル情報を取得
+    const tableInfo = database.prepare('PRAGMA table_info(companies)').all() as Array<{ name: string }>;
+    const existingColumns = new Set(tableInfo.map(col => col.name));
+
+    // budget_rank カラムが存在しない場合は追加
+    if (!existingColumns.has('budget_rank')) {
+        console.log('[Database] Adding budget_rank column to companies table');
+        database.exec(`ALTER TABLE companies ADD COLUMN budget_rank TEXT CHECK(budget_rank IN ('A', 'B', 'C'))`);
+    }
+
+    // rank_confidence カラムが存在しない場合は追加
+    if (!existingColumns.has('rank_confidence')) {
+        console.log('[Database] Adding rank_confidence column to companies table');
+        database.exec(`ALTER TABLE companies ADD COLUMN rank_confidence REAL`);
+    }
+
+    // rank_detected_at カラムが存在しない場合は追加
+    if (!existingColumns.has('rank_detected_at')) {
+        console.log('[Database] Adding rank_detected_at column to companies table');
+        database.exec(`ALTER TABLE companies ADD COLUMN rank_detected_at DATETIME`);
+    }
+
+    // budget_rank用のインデックスを作成
+    database.exec(`CREATE INDEX IF NOT EXISTS idx_companies_budget_rank ON companies(budget_rank)`);
 }
 
 // Repository Functions
@@ -229,7 +264,13 @@ export const companyRepository = {
             // However, scraping usually tracks source.
             // I will add 'source' column implicitly to avoid breaking existing Dashboard logic.
 
-            const insertData = { ...company, last_seen_at: new Date().toISOString() };
+            const now = new Date().toISOString();
+            const insertData = {
+                ...company,
+                last_seen_at: now,
+                // ランク情報がある場合は検出日時を設定
+                rank_detected_at: company.budget_rank ? now : null,
+            };
             const columns = Object.keys(insertData).join(', ');
             const placeholders = Object.keys(insertData).map(() => '?').join(', ');
             const values = Object.values(insertData);
@@ -263,6 +304,13 @@ export const companyRepository = {
 
             // Conditional update (Clean missing data)
             if (company.phone && !existing.phone) updateFields.phone = company.phone;
+
+            // ランク関連フィールドの更新（常に上書き）
+            if (company.budget_rank) {
+                updateFields.budget_rank = company.budget_rank;
+                updateFields.rank_confidence = company.rank_confidence ?? null;
+                updateFields.rank_detected_at = new Date().toISOString();
+            }
 
             // Always update timestamps
             updateFields.last_seen_at = new Date().toISOString();

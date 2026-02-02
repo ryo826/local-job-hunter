@@ -1,10 +1,39 @@
-import { Page } from 'playwright';
-import { ScrapingStrategy, CompanyData, ScrapingParams, ScrapingCallbacks } from './ScrapingStrategy';
+import { Page, Locator } from 'playwright';
+import { ScrapingStrategy, CompanyData, ScrapingParams, ScrapingCallbacks, BudgetRank } from './ScrapingStrategy';
 import { normalizeIndustry, normalizeArea, normalizeSalary, normalizeEmployees } from '../utils/data-normalizer';
 
 // ランダム待機時間のヘルパー関数
 function randomDelay(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// ランク判定結果
+interface RankResult {
+    rank: BudgetRank;
+    confidence: number;
+}
+
+// dodaのランク判定ロジック
+// 重要: 「新着」タグ(FillTag-module_tag--red)は使用禁止（掲載時期を示すのみ）
+// 判定基準: PR枠URL > ページ内表示順序
+async function classifyDoda(card: Locator, displayIndex: number): Promise<RankResult> {
+    try {
+        // 1. PR枠のURL判定
+        const linkEl = card.locator('a.jobCard-header__link').first();
+        const href = await linkEl.getAttribute('href');
+        const isPR = href?.includes('-tab__pr/') ?? false;
+
+        if (isPR) {
+            return { rank: 'A', confidence: 0.9 };  // PR枠(確定)
+        } else if (displayIndex < 20) {
+            return { rank: 'B', confidence: 0.7 };  // ページ内上位20件
+        } else {
+            return { rank: 'C', confidence: 0.6 };  // 21件目以降
+        }
+    } catch (error) {
+        console.warn(`Rank classification failed: ${error}`);
+        return { rank: 'C', confidence: 0.3 }; // デフォルトで最下位ランク
+    }
 }
 
 // doda都道府県コードマッピング（JISコード準拠）
@@ -209,8 +238,12 @@ export class DodaStrategy implements ScrapingStrategy {
                 break;
             }
 
-            for (const card of jobCards) {
+            for (let displayIndex = 0; displayIndex < jobCards.length; displayIndex++) {
+                const card = jobCards[displayIndex];
                 try {
+                    // ランク判定（PR枠かどうかを確認）
+                    const rankResult = await classifyDoda(card, displayIndex);
+
                     // 求人詳細ページへのリンクを取得
                     const linkEl = card.locator('a.jobCard-header__link').first();
                     const url = await linkEl.getAttribute('href');
@@ -349,6 +382,9 @@ export class DodaStrategy implements ScrapingStrategy {
                         homepage_url: companyUrl,
                         industry: normalizeIndustry(industry),
                         scrape_status: 'step1_completed',
+                        // ランク情報
+                        budget_rank: rankResult.rank,
+                        rank_confidence: rankResult.confidence,
                     };
 
                     // リストページに戻る

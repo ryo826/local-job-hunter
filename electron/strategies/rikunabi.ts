@@ -1,10 +1,42 @@
-import { Page } from 'playwright';
-import { ScrapingStrategy, CompanyData, ScrapingParams, ScrapingCallbacks } from './ScrapingStrategy';
+import { Page, Locator } from 'playwright';
+import { ScrapingStrategy, CompanyData, ScrapingParams, ScrapingCallbacks, BudgetRank } from './ScrapingStrategy';
 import { normalizeIndustry, normalizeArea, normalizeSalary, normalizeEmployees } from '../utils/data-normalizer';
 
 // ランダム待機時間のヘルパー関数
 function randomDelay(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// ランク判定結果
+interface RankResult {
+    rank: BudgetRank;
+    confidence: number;
+}
+
+// リクナビNEXTのランク判定ロジック
+// isJobFlairフラグ > ページ内表示順序
+// リクナビは100件/ページ表示
+async function classifyRikunabi(card: Locator, displayIndex: number, pageNum: number): Promise<RankResult> {
+    try {
+        // 1. isJobFlairフラグの検出を試みる
+        // Job Flairオプションはカードにプレミアムなスタイリングが適用される
+        // 通常、特別なクラス名やdata属性で判別可能
+        const hasJobFlair = await card.locator('[class*="flair"], [class*="premium"], [class*="sponsored"]').count() > 0;
+
+        // 絶対インデックスを計算（100件/ページ）
+        const absoluteIndex = (pageNum - 1) * 100 + displayIndex;
+
+        if (hasJobFlair) {
+            return { rank: 'A', confidence: 0.9 };  // Job Flairオプション付き
+        } else if (absoluteIndex < 100) {
+            return { rank: 'B', confidence: 0.7 };  // 1ページ目(100件以内)
+        } else {
+            return { rank: 'C', confidence: 0.6 };  // 2ページ目以降
+        }
+    } catch (error) {
+        console.warn(`Rank classification failed: ${error}`);
+        return { rank: 'C', confidence: 0.3 }; // デフォルトで最下位ランク
+    }
 }
 
 // リクナビNEXT都道府県マッピング（英語名）
@@ -280,20 +312,23 @@ export class RikunabiStrategy implements ScrapingStrategy {
                 break;
             }
 
-            // 各カードからURLを収集
-            const jobUrls: string[] = [];
-            for (const card of jobCards) {
+            // 各カードからURLとランクを収集
+            const jobUrlsWithRank: { url: string; rankResult: RankResult }[] = [];
+            for (let displayIndex = 0; displayIndex < jobCards.length; displayIndex++) {
+                const card = jobCards[displayIndex];
                 const href = await card.getAttribute('href');
                 if (href && href.includes('/viewjob/')) {
-                    jobUrls.push(href);
+                    // ランク判定
+                    const rankResult = await classifyRikunabi(card, displayIndex, pageNum);
+                    jobUrlsWithRank.push({ url: href, rankResult });
                 }
             }
-            log(`Collected ${jobUrls.length} job URLs`);
+            log(`Collected ${jobUrlsWithRank.length} job URLs (Page ${pageNum})`);
 
             // 各求人詳細ページを訪問
-            for (const jobUrl of jobUrls) {
+            for (const jobInfo of jobUrlsWithRank) {
                 try {
-                    const fullUrl = jobUrl.startsWith('http') ? jobUrl : `https://next.rikunabi.com${jobUrl}`;
+                    const fullUrl = jobInfo.url.startsWith('http') ? jobInfo.url : `https://next.rikunabi.com${jobInfo.url}`;
                     log(`Visiting: ${fullUrl}`);
 
                     // レート制限
@@ -371,6 +406,9 @@ export class RikunabiStrategy implements ScrapingStrategy {
                         homepage_url: homepageUrl,
                         industry: normalizeIndustry(companyInfo['事業内容']),
                         scrape_status: 'step1_completed',
+                        // ランク情報
+                        budget_rank: jobInfo.rankResult.rank,
+                        rank_confidence: jobInfo.rankResult.confidence,
                     };
 
                 } catch (err: any) {

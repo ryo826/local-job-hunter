@@ -1,6 +1,9 @@
 
 import { Page } from 'playwright';
 
+// ランク型定義
+export type BudgetRank = 'A' | 'B' | 'C';
+
 export interface CompanyData {
     company_name: string;
     url: string;
@@ -22,6 +25,9 @@ export interface CompanyData {
     address?: string;
     scrape_status?: 'pending' | 'step1_completed' | 'step2_completed' | 'failed';
     error_message?: string;
+    // ランク関連フィールド
+    budget_rank?: BudgetRank;
+    rank_confidence?: number;
 }
 
 export interface ScrapingParams {

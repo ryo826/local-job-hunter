@@ -1,4 +1,25 @@
 
+// ランク定義
+export type BudgetRank = 'A' | 'B' | 'C';
+
+export const RANK_DEFINITIONS = {
+    A: {
+        label: '高予算層',
+        description: 'プレミアム枠・PR枠・Job Flair等の有料オプション使用',
+        confidence: 0.9
+    },
+    B: {
+        label: '中予算層',
+        description: '1ページ目表示(上位30〜100件)',
+        confidence: 0.7
+    },
+    C: {
+        label: '低予算層',
+        description: '2ページ目以降または下位表示',
+        confidence: 0.6
+    }
+} as const;
+
 export interface Company {
     id: number;
     company_name: string;
@@ -23,6 +44,10 @@ export interface Company {
     note: string | null;
     last_seen_at: string | null;
     created_at: string;
+    // ランク関連フィールド
+    budget_rank: BudgetRank | null;
+    rank_confidence: number | null;
+    rank_detected_at: string | null;
 }
 
 export type CompanyFilters = {
@@ -36,6 +61,7 @@ export interface ScrapingOptions {
     location?: string;
     prefectures?: string[];  // 複数の都道府県
     jobTypes?: string[];     // 複数の職種カテゴリ
+    rankFilter?: BudgetRank[];  // 保存対象のランク（空配列または未指定で全て保存）
 }
 
 export interface ScrapingProgress {
