@@ -349,12 +349,63 @@ export class UpdateEngine {
                         // ランク判定
                         const rank = await this.classifyDodaCard(card, i);
 
+                        // 詳細ページに移動して日付情報を取得
+                        let jobPageUpdatedAt: Date | null = null;
+                        let jobPageEndDate: Date | null = null;
+                        if (url) {
+                            const fullUrl = url.startsWith('http') ? url : `https://doda.jp${url}`;
+                            try {
+                                await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+                                await page.waitForTimeout(randomDelay(1000, 2000));
+
+                                // dodaの日付情報を抽出
+                                const dateText = await page.evaluate(() => {
+                                    const selectors = [
+                                        '.jobSearchDetail-heading__publishingDate',
+                                        '[class*="publishingDate"]',
+                                        '.detailPublish',
+                                    ];
+                                    for (const selector of selectors) {
+                                        const el = document.querySelector(selector);
+                                        if (el?.textContent) return el.textContent;
+                                    }
+                                    return null;
+                                });
+
+                                if (dateText) {
+                                    // 掲載予定期間を抽出
+                                    const periodRegex = /掲載予定期間[：:]\s*(\d{4}\/\d{1,2}\/\d{1,2})[（(][月火水木金土日][）)]\s*[～〜ー-]\s*(\d{4}\/\d{1,2}\/\d{1,2})/;
+                                    const updateRegex = /更新日[：:]\s*(\d{4}\/\d{1,2}\/\d{1,2})/;
+
+                                    const periodMatch = dateText.match(periodRegex);
+                                    const updateMatch = dateText.match(updateRegex);
+
+                                    if (updateMatch) {
+                                        const parts = updateMatch[1].split('/');
+                                        jobPageUpdatedAt = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                                    }
+                                    if (periodMatch) {
+                                        const parts = periodMatch[2].split('/');
+                                        jobPageEndDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                                    }
+                                }
+
+                                // 検索結果に戻る
+                                await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+                                await page.waitForTimeout(randomDelay(1000, 2000));
+                            } catch (navError) {
+                                log(`[doda] 詳細ページ取得エラー: ${navError}`);
+                            }
+                        }
+
                         jobs.push({
                             title: title?.trim() || '',
                             company: cardCompanyName.trim(),
                             rank,
                             url: url || '',
                             source: 'doda',
+                            jobPageUpdatedAt,
+                            jobPageEndDate,
                         });
                     }
                 } catch {
@@ -439,12 +490,49 @@ export class UpdateEngine {
                         // ランク判定
                         const rank = await this.classifyRikunabiCard(card, i, 1);
 
+                        // 詳細ページに移動して日付情報を取得
+                        let jobPageUpdatedAt: Date | null = null;
+                        if (url) {
+                            const fullUrl = url.startsWith('http') ? url : `https://next.rikunabi.com${url}`;
+                            try {
+                                await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+                                await page.waitForTimeout(randomDelay(1500, 2500));
+
+                                // __NEXT_DATA__からdatePublishedを抽出
+                                const datePublished = await page.evaluate(() => {
+                                    const scriptTag = document.querySelector('script#__NEXT_DATA__');
+                                    if (!scriptTag?.textContent) return null;
+                                    try {
+                                        const data = JSON.parse(scriptTag.textContent);
+                                        const timestamp = data?.props?.pageProps?.job?.lettice?.letticeLogBase?.datePublished;
+                                        if (timestamp) return timestamp;
+                                        const jobData = data?.props?.pageProps?.jobData;
+                                        if (jobData?.datePublished) return jobData.datePublished;
+                                        return null;
+                                    } catch {
+                                        return null;
+                                    }
+                                });
+
+                                if (datePublished && typeof datePublished === 'number') {
+                                    jobPageUpdatedAt = new Date(datePublished);
+                                }
+
+                                // 検索結果に戻る
+                                await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+                                await page.waitForTimeout(randomDelay(1000, 2000));
+                            } catch (navError) {
+                                log(`[Rikunabi] 詳細ページ取得エラー: ${navError}`);
+                            }
+                        }
+
                         jobs.push({
                             title: title?.trim() || '',
                             company: cardCompanyName.trim(),
                             rank,
                             url: url || '',
                             source: 'rikunabi',
+                            jobPageUpdatedAt,
                         });
                     }
                 } catch {

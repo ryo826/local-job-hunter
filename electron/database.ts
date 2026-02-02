@@ -397,6 +397,17 @@ export const companyRepository = {
                 updateFields.rank_detected_at = new Date().toISOString();
             }
 
+            // 求人ページ更新日関連フィールドの更新（新しい値がある場合は更新）
+            if (company.job_page_updated_at) {
+                updateFields.job_page_updated_at = company.job_page_updated_at;
+            }
+            if (company.job_page_end_date) {
+                updateFields.job_page_end_date = company.job_page_end_date;
+            }
+            if (company.job_page_start_date) {
+                updateFields.job_page_start_date = company.job_page_start_date;
+            }
+
             // Always update timestamps
             updateFields.last_seen_at = new Date().toISOString();
 
