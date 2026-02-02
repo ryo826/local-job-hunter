@@ -43,6 +43,10 @@ import type { Company, BudgetRank } from '@/types';
 import { formatCompanyData } from '@/utils/companyFormatter';
 import { cn } from '@/lib/utils';
 
+interface ListPageProps {
+    sidebarCollapsed?: boolean;
+}
+
 // ランク定義（ツールチップ用）
 const RANK_DEFINITIONS = {
     A: {
@@ -191,7 +195,7 @@ const statusConfig: Record<string, { label: string; className: string }> = {
     ng: { label: 'NG', className: 'bg-red-200 text-red-800 dark:bg-red-950 dark:text-red-300' },
 };
 
-export function ListPage() {
+export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
     const {
         companies,
         filters,
@@ -1416,8 +1420,9 @@ export function ListPage() {
             {/* Detail Slide Panel */}
             <div
                 className={cn(
-                    'fixed left-64 right-0 bottom-0 h-1/2 bg-background border-t border-border shadow-2xl transition-transform duration-300 ease-out z-40',
-                    isDetailOpen ? 'translate-y-0' : 'translate-y-full'
+                    'fixed right-0 bottom-0 h-1/2 bg-background border-t border-border shadow-2xl transition-all duration-300 ease-out z-40',
+                    isDetailOpen ? 'translate-y-0' : 'translate-y-full',
+                    sidebarCollapsed ? 'left-0' : 'left-64'
                 )}
             >
                 {/* Panel Header */}
