@@ -953,7 +953,7 @@ export function ListPage() {
             {/* Data Table */}
             <Card className="overflow-hidden rounded-2xl">
                 <div className="overflow-auto max-h-[calc(100vh-280px)]">
-                    <table className="w-full text-sm">
+                    <table className="w-full text-sm min-w-[1400px]">
                         <thead className="bg-muted/50 border-b sticky top-0 z-10">
                             <tr>
                                 <th className="p-3 w-10 bg-muted/50">
