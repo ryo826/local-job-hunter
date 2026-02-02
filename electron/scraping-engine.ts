@@ -489,9 +489,10 @@ export class ScrapingEngine {
         } catch (e: any) {
             console.error(`Error in strategy ${strategy.source}:`, e);
             errors++;
+            const processed = newCount + duplicateCount + skippedCount;
             onProgress({
-                current,
-                total: totalJobs ?? current,
+                current: processed,
+                total: totalJobs ?? processed,
                 newCount,
                 duplicateCount,
                 source: strategy.source,

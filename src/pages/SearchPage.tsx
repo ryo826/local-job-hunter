@@ -127,7 +127,7 @@ const siteInfo = {
 };
 
 export function SearchPage() {
-    const { isScrapingRunning, scrapingProgress, startScraping, stopScraping } = useAppStore();
+    const { isScrapingRunning, scrapingProgress, scrapingSettings, startScraping, stopScraping, setScrapingSettings } = useAppStore();
 
     const [keyword, setKeyword] = useState('');
     const [selectedSites, setSelectedSites] = useState({
@@ -152,6 +152,20 @@ export function SearchPage() {
     const [salaryFilter, setSalaryFilter] = useState('all');
     const [employeesFilter, setEmployeesFilter] = useState('all');
     const [jobUpdatedFilter, setJobUpdatedFilter] = useState('all');
+
+    // スクレイピング実行中の設定を復元
+    useEffect(() => {
+        if (isScrapingRunning && scrapingSettings) {
+            setKeyword(scrapingSettings.keyword);
+            setSelectedSites(scrapingSettings.selectedSites);
+            setSelectedPrefectures(new Set(scrapingSettings.selectedPrefectures));
+            setSelectedJobTypes(new Set(scrapingSettings.selectedJobTypes));
+            setSelectedRanks(new Set(scrapingSettings.selectedRanks));
+            setSalaryFilter(scrapingSettings.salaryFilter);
+            setEmployeesFilter(scrapingSettings.employeesFilter);
+            setJobUpdatedFilter(scrapingSettings.jobUpdatedFilter);
+        }
+    }, []);
 
     // Listen for scraper logs and output to console
     useEffect(() => {
@@ -266,6 +280,18 @@ export function SearchPage() {
         const selectedJobTypeNames = jobTypeCategories
             .filter(cat => selectedJobTypes.has(cat.id))
             .map(cat => cat.name);
+
+        // 設定を保存（ページ移動時に復元するため）
+        setScrapingSettings({
+            keyword,
+            selectedSites,
+            selectedPrefectures: Array.from(selectedPrefectures),
+            selectedJobTypes: Array.from(selectedJobTypes),
+            selectedRanks: Array.from(selectedRanks),
+            salaryFilter,
+            employeesFilter,
+            jobUpdatedFilter,
+        });
 
         await startScraping({
             sources,

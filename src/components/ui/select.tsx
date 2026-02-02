@@ -5,6 +5,7 @@ interface SelectProps {
     value?: string;
     onValueChange?: (value: string) => void;
     children: React.ReactNode;
+    disabled?: boolean;
 }
 
 const SelectContext = React.createContext<{
@@ -12,16 +13,17 @@ const SelectContext = React.createContext<{
     onValueChange?: (value: string) => void;
     open: boolean;
     setOpen: (open: boolean) => void;
+    disabled?: boolean;
 }>({
     open: false,
     setOpen: () => { },
 });
 
-const Select = ({ value, onValueChange, children }: SelectProps) => {
+const Select = ({ value, onValueChange, children, disabled }: SelectProps) => {
     const [open, setOpen] = React.useState(false);
 
     return (
-        <SelectContext.Provider value={{ value, onValueChange, open, setOpen }}>
+        <SelectContext.Provider value={{ value, onValueChange, open, setOpen, disabled }}>
             <div className="relative">{children}</div>
         </SelectContext.Provider>
     );
@@ -31,17 +33,18 @@ const SelectTrigger = React.forwardRef<
     HTMLButtonElement,
     React.ButtonHTMLAttributes<HTMLButtonElement>
 >(({ className, children, ...props }, ref) => {
-    const { open, setOpen } = React.useContext(SelectContext);
+    const { open, setOpen, disabled } = React.useContext(SelectContext);
 
     return (
         <button
             ref={ref}
             type="button"
+            disabled={disabled}
             className={cn(
                 "flex h-9 w-full items-center justify-between whitespace-nowrap rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
                 className
             )}
-            onClick={() => setOpen(!open)}
+            onClick={() => !disabled && setOpen(!open)}
             {...props}
         >
             {children}

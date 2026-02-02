@@ -1,5 +1,21 @@
 import { create } from 'zustand';
-import type { Company, CompanyFilters, ScrapingProgress, ScrapingOptions, UpdateProgress, UpdateResult } from '../types';
+import type { Company, CompanyFilters, ScrapingProgress, ScrapingOptions, UpdateProgress, UpdateResult, BudgetRank } from '../types';
+
+// スクレイピング設定の状態
+export interface ScrapingSettingsState {
+    keyword: string;
+    selectedSites: {
+        mynavi: boolean;
+        rikunabi: boolean;
+        doda: boolean;
+    };
+    selectedPrefectures: string[];
+    selectedJobTypes: string[];
+    selectedRanks: BudgetRank[];
+    salaryFilter: string;
+    employeesFilter: string;
+    jobUpdatedFilter: string;
+}
 
 interface AppState {
     // Companies
@@ -13,8 +29,10 @@ interface AppState {
     // Scraping
     isScrapingRunning: boolean;
     scrapingProgress: ScrapingProgress | null;
+    scrapingSettings: ScrapingSettingsState | null;
     setScrapingRunning: (isRunning: boolean) => void;
     setScrapingProgress: (progress: ScrapingProgress | null) => void;
+    setScrapingSettings: (settings: ScrapingSettingsState | null) => void;
 
     // Update
     isUpdateRunning: boolean;
@@ -41,6 +59,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     isLoading: false,
     isScrapingRunning: false,
     scrapingProgress: null,
+    scrapingSettings: null,
     isUpdateRunning: false,
     updateProgress: null,
     lastUpdateResults: null,
@@ -51,6 +70,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     setIsLoading: (isLoading) => set({ isLoading }),
     setScrapingRunning: (isScrapingRunning) => set({ isScrapingRunning }),
     setScrapingProgress: (scrapingProgress) => set({ scrapingProgress }),
+    setScrapingSettings: (scrapingSettings) => set({ scrapingSettings }),
     setUpdateRunning: (isUpdateRunning) => set({ isUpdateRunning }),
     setUpdateProgress: (updateProgress) => set({ updateProgress }),
     setLastUpdateResults: (lastUpdateResults) => set({ lastUpdateResults }),
@@ -106,7 +126,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         } finally {
             window.electronAPI.scraper.offProgress();
             window.electronAPI.scraper.offLog();
-            set({ isScrapingRunning: false });
+            set({ isScrapingRunning: false, scrapingSettings: null });
             // Refresh companies after scraping
             await get().fetchCompanies();
         }
@@ -119,7 +139,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             console.error('Failed to stop scraping:', error);
         } finally {
             window.electronAPI.scraper.offProgress();
-            set({ isScrapingRunning: false, scrapingProgress: null });
+            set({ isScrapingRunning: false, scrapingProgress: null, scrapingSettings: null });
         }
     },
 
