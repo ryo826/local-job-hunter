@@ -1,9 +1,13 @@
-import { chromium, Browser, Page, Locator } from 'playwright';
+import { chromium, Browser, Page, Locator, BrowserContext } from 'playwright';
 import { companyRepository } from './database';
 import type { Company, BudgetRank, UpdateProgress, UpdateResult, UpdateChanges } from '../src/types';
 import Database from 'better-sqlite3';
 import path from 'path';
 import { app } from 'electron';
+
+// 並列処理の設定
+const PARALLEL_COMPANIES = 3;  // 同時に更新する会社数
+const PARALLEL_SITES = true;   // 3サイトを同時に検索
 
 // ランダム待機時間
 function randomDelay(min: number, max: number): number {
@@ -29,7 +33,6 @@ interface JobListing {
     rank: BudgetRank;
     url: string;
     source: string;
-    // 求人ページ更新日関連
     jobPageUpdatedAt?: Date | null;
     jobPageEndDate?: Date | null;
 }
@@ -43,7 +46,6 @@ interface ScrapingResult {
         doda: number;
         rikunabi: number;
     };
-    // 最新の求人ページ更新日
     latestJobPageUpdatedAt: Date | null;
     latestJobPageEndDate: Date | null;
 }
@@ -97,58 +99,77 @@ export class UpdateEngine {
                 companies = companyRepository.getAll({});
             }
 
-            log(`更新対象: ${companies.length}社`);
+            log(`更新対象: ${companies.length}社 (${PARALLEL_COMPANIES}並列処理)`);
 
             const results: UpdateResult[] = [];
             const startTime = Date.now();
+            let completedCount = 0;
 
-            for (let i = 0; i < companies.length; i++) {
+            // 会社を並列で処理
+            const processCompanyBatch = async (batch: Company[]) => {
+                return Promise.all(batch.map(async (company) => {
+                    if (this.shouldStop) return null;
+
+                    try {
+                        const result = await this.updateSingleCompany(company, log);
+                        completedCount++;
+
+                        onProgress({
+                            current: completedCount,
+                            total: companies.length,
+                            companyName: company.company_name,
+                            status: `${company.company_name} 更新完了 (${completedCount}/${companies.length})`,
+                            startTime,
+                        });
+
+                        // 変更があった場合はログ出力
+                        if (Object.keys(result.changes).length > 0) {
+                            log(`変更検出: ${company.company_name}`);
+                            if (result.changes.rank) {
+                                log(`  ランク: ${result.changes.rank.old} → ${result.changes.rank.new}`);
+                            }
+                            if (result.changes.jobCount) {
+                                log(`  求人数: ${result.changes.jobCount.old} → ${result.changes.jobCount.new}`);
+                            }
+                        }
+
+                        return result;
+                    } catch (error: any) {
+                        log(`エラー (${company.company_name}): ${error.message}`);
+                        completedCount++;
+                        return {
+                            companyId: company.id,
+                            companyName: company.company_name,
+                            changes: {},
+                            updatedAt: new Date().toISOString(),
+                            error: error.message,
+                        };
+                    }
+                }));
+            };
+
+            // バッチ処理
+            for (let i = 0; i < companies.length; i += PARALLEL_COMPANIES) {
                 if (this.shouldStop) {
                     log('更新を中止しました');
                     break;
                 }
 
-                const company = companies[i];
+                const batch = companies.slice(i, i + PARALLEL_COMPANIES);
                 onProgress({
-                    current: i + 1,
+                    current: completedCount,
                     total: companies.length,
-                    companyName: company.company_name,
-                    status: `${company.company_name} を更新中...`,
+                    companyName: batch.map(c => c.company_name).join(', '),
+                    status: `${PARALLEL_COMPANIES}社を同時更新中...`,
                     startTime,
                 });
 
-                try {
-                    const result = await this.updateSingleCompany(company, log);
-                    results.push(result);
+                const batchResults = await processCompanyBatch(batch);
+                results.push(...batchResults.filter((r): r is UpdateResult => r !== null));
 
-                    // 変更があった場合はログ出力
-                    if (Object.keys(result.changes).length > 0) {
-                        log(`変更検出: ${company.company_name}`);
-                        if (result.changes.rank) {
-                            log(`  ランク: ${result.changes.rank.old} → ${result.changes.rank.new}`);
-                        }
-                        if (result.changes.jobCount) {
-                            log(`  求人数: ${result.changes.jobCount.old} → ${result.changes.jobCount.new}`);
-                        }
-                        if (result.changes.status) {
-                            log(`  ステータス: ${result.changes.status.old} → ${result.changes.status.new}`);
-                        }
-                    }
-
-                } catch (error: any) {
-                    log(`エラー (${company.company_name}): ${error.message}`);
-                    results.push({
-                        companyId: company.id,
-                        companyName: company.company_name,
-                        changes: {},
-                        updatedAt: new Date().toISOString(),
-                        error: error.message,
-                    });
-                }
-
-                // レート制限（3秒間隔）
-                if (i < companies.length - 1) {
-                    await sleep(3000);
+                // バッチ間の待機（1秒）
+                if (i + PARALLEL_COMPANIES < companies.length) {
+                    await sleep(1000);
                 }
             }
 
@@ -187,22 +208,29 @@ export class UpdateEngine {
         });
 
         try {
-            // 検索用に会社名を正規化
             const searchName = normalizeCompanyName(company.company_name);
-            log(`検索キーワード: ${searchName}`);
+            log(`検索開始: ${company.company_name}`);
 
-            // 各サイトで順次検索（別ページを使用）
-            const mynaviJobs = await this.scrapeMynaviForCompany(context, searchName, company.company_name, log);
-            const dodaJobs = await this.scrapeDodaForCompany(context, searchName, company.company_name, log);
-            const rikunabiJobs = await this.scrapeRikunabiForCompany(context, searchName, company.company_name, log);
+            let mynaviJobs: JobListing[] = [];
+            let dodaJobs: JobListing[] = [];
+            let rikunabiJobs: JobListing[] = [];
 
-            // 結果を集約
+            if (PARALLEL_SITES) {
+                // 3サイトを並列で検索
+                [mynaviJobs, dodaJobs, rikunabiJobs] = await Promise.all([
+                    this.scrapeMynaviForCompany(context, searchName, company.company_name, log),
+                    this.scrapeDodaForCompany(context, searchName, company.company_name, log),
+                    this.scrapeRikunabiForCompany(context, searchName, company.company_name, log),
+                ]);
+            } else {
+                // 順次検索
+                mynaviJobs = await this.scrapeMynaviForCompany(context, searchName, company.company_name, log);
+                dodaJobs = await this.scrapeDodaForCompany(context, searchName, company.company_name, log);
+                rikunabiJobs = await this.scrapeRikunabiForCompany(context, searchName, company.company_name, log);
+            }
+
             const aggregated = this.aggregateResults(mynaviJobs, dodaJobs, rikunabiJobs);
-
-            // 変更検出
             const changes = this.detectChanges(company, aggregated);
-
-            // データベース更新
             await this.updateDatabase(company.id, aggregated, changes);
 
             return {
@@ -217,75 +245,51 @@ export class UpdateEngine {
         }
     }
 
-    // マイナビで会社名検索
+    // マイナビで会社名検索（シンプル化）
     private async scrapeMynaviForCompany(
-        context: any,
+        context: BrowserContext,
         searchName: string,
         originalName: string,
         log: (msg: string) => void
     ): Promise<JobListing[]> {
         const page = await context.newPage();
-        // マイナビの検索URL（フリーワード検索）
         const searchUrl = `https://tenshoku.mynavi.jp/list/kw${encodeURIComponent(searchName)}/`;
-        log(`[Mynavi] 検索: ${searchName}`);
 
         try {
-            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-            await page.waitForTimeout(randomDelay(2000, 4000));
+            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+            await page.waitForTimeout(randomDelay(1000, 2000));
 
             const jobs: JobListing[] = [];
             const cards = await page.locator('.cassetteRecruit__content, .cassetteRecruitRecommend').all();
 
-            for (let i = 0; i < Math.min(cards.length, 10); i++) {
+            for (let i = 0; i < Math.min(cards.length, 5); i++) {
                 try {
                     const card = cards[i];
                     const nameEl = card.locator('.cassetteRecruit__name, .cassetteRecruitRecommend__name').first();
-                    const cardCompanyName = await nameEl.textContent({ timeout: 3000 }).catch(() => null);
+                    const cardCompanyName = await nameEl.textContent({ timeout: 2000 }).catch(() => null);
 
-                    // 会社名の部分一致チェック
                     if (cardCompanyName && this.isCompanyMatch(cardCompanyName.trim(), originalName)) {
                         const titleEl = card.locator('.cassetteRecruit__copy, .cassetteRecruitRecommend__copy').first();
-                        const title = await titleEl.textContent({ timeout: 3000 }).catch(() => '');
-                        const linkEl = card.locator('a[href*="/jobinfo"]').first();
-                        const url = await linkEl.getAttribute('href').catch(() => '');
-
-                        // ランク判定
+                        const title = await titleEl.textContent({ timeout: 2000 }).catch(() => '');
                         const rank = await this.classifyMynaviCard(card, 1);
 
-                        // 日付情報を抽出
-                        const dataTy = await card.getAttribute('data-ty').catch(() => null);
-                        const isPremium = dataTy === 'rzs';
-                        const updateSelector = isPremium
-                            ? '.cassetteRecruitRecommend__updateDate span, .cassetteRecruitRecommend__updateDate'
-                            : '.cassetteRecruit__updateDate span, .cassetteRecruit__updateDate';
-                        const endSelector = isPremium
-                            ? '.cassetteRecruitRecommend__endDate span, .cassetteRecruitRecommend__endDate'
-                            : '.cassetteRecruit__endDate span, .cassetteRecruit__endDate';
-
+                        // 日付情報を直接カードから取得（詳細ページ不要）
                         let jobPageUpdatedAt: Date | null = null;
                         let jobPageEndDate: Date | null = null;
 
-                        const updateDateEl = card.locator(updateSelector).first();
-                        if (await updateDateEl.count() > 0) {
-                            const updateDateText = await updateDateEl.textContent({ timeout: 2000 }).catch(() => null);
-                            if (updateDateText) {
-                                const match = updateDateText.match(/(\d{4}\/\d{1,2}\/\d{1,2})/);
-                                if (match) {
-                                    const parts = match[1].split('/');
-                                    jobPageUpdatedAt = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-                                }
-                            }
-                        }
+                        const dataTy = await card.getAttribute('data-ty').catch(() => null);
+                        const isPremium = dataTy === 'rzs';
+                        const updateSelector = isPremium
+                            ? '.cassetteRecruitRecommend__updateDate span'
+                            : '.cassetteRecruit__updateDate span';
 
-                        const endDateEl = card.locator(endSelector).first();
-                        if (await endDateEl.count() > 0) {
-                            const endDateText = await endDateEl.textContent({ timeout: 2000 }).catch(() => null);
-                            if (endDateText) {
-                                const match = endDateText.match(/(\d{4}\/\d{1,2}\/\d{1,2})/);
-                                if (match) {
-                                    const parts = match[1].split('/');
-                                    jobPageEndDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-                                }
+                        const updateDateText = await card.locator(updateSelector).first()
+                            .textContent({ timeout: 1000 }).catch(() => null);
+                        if (updateDateText) {
+                            const match = updateDateText.match(/(\d{4}\/\d{1,2}\/\d{1,2})/);
+                            if (match) {
+                                const parts = match[1].split('/');
+                                jobPageUpdatedAt = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
                             }
                         }
 
@@ -293,7 +297,7 @@ export class UpdateEngine {
                             title: title?.trim() || '',
                             company: cardCompanyName.trim(),
                             rank,
-                            url: url || '',
+                            url: '',
                             source: 'mynavi',
                             jobPageUpdatedAt,
                             jobPageEndDate,
@@ -304,108 +308,48 @@ export class UpdateEngine {
                 }
             }
 
-            log(`[Mynavi] ${jobs.length}件の求人を検出`);
             return jobs;
-
         } catch (error: any) {
-            log(`[Mynavi] エラー: ${error.message}`);
             return [];
         } finally {
             await page.close();
         }
     }
 
-    // dodaで会社名検索
+    // dodaで会社名検索（詳細ページ訪問を削除）
     private async scrapeDodaForCompany(
-        context: any,
+        context: BrowserContext,
         searchName: string,
         originalName: string,
         log: (msg: string) => void
     ): Promise<JobListing[]> {
         const page = await context.newPage();
-        // dodaの検索URL（キーワード検索）
         const searchUrl = `https://doda.jp/keyword/${encodeURIComponent(searchName)}/`;
-        log(`[doda] 検索: ${searchName}`);
 
         try {
-            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-            await page.waitForTimeout(randomDelay(2000, 4000));
+            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+            await page.waitForTimeout(randomDelay(1000, 2000));
 
             const jobs: JobListing[] = [];
             const cards = await page.locator('[class*="JobCard"]').all();
 
-            for (let i = 0; i < Math.min(cards.length, 10); i++) {
+            for (let i = 0; i < Math.min(cards.length, 5); i++) {
                 try {
                     const card = cards[i];
                     const companyEl = card.locator('[class*="company"], [class*="Company"]').first();
-                    const cardCompanyName = await companyEl.textContent({ timeout: 3000 }).catch(() => null);
+                    const cardCompanyName = await companyEl.textContent({ timeout: 2000 }).catch(() => null);
 
                     if (cardCompanyName && this.isCompanyMatch(cardCompanyName.trim(), originalName)) {
                         const titleEl = card.locator('[class*="title"], [class*="Title"]').first();
-                        const title = await titleEl.textContent({ timeout: 3000 }).catch(() => '');
-                        const linkEl = card.locator('a[href*="/job/"]').first();
-                        const url = await linkEl.getAttribute('href').catch(() => '');
-
-                        // ランク判定
+                        const title = await titleEl.textContent({ timeout: 2000 }).catch(() => '');
                         const rank = await this.classifyDodaCard(card, i);
-
-                        // 詳細ページに移動して日付情報を取得
-                        let jobPageUpdatedAt: Date | null = null;
-                        let jobPageEndDate: Date | null = null;
-                        if (url) {
-                            const fullUrl = url.startsWith('http') ? url : `https://doda.jp${url}`;
-                            try {
-                                await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
-                                await page.waitForTimeout(randomDelay(1000, 2000));
-
-                                // dodaの日付情報を抽出
-                                const dateText = await page.evaluate(() => {
-                                    const selectors = [
-                                        '.jobSearchDetail-heading__publishingDate',
-                                        '[class*="publishingDate"]',
-                                        '.detailPublish',
-                                    ];
-                                    for (const selector of selectors) {
-                                        const el = document.querySelector(selector);
-                                        if (el?.textContent) return el.textContent;
-                                    }
-                                    return null;
-                                });
-
-                                if (dateText) {
-                                    // 掲載予定期間を抽出
-                                    const periodRegex = /掲載予定期間[：:]\s*(\d{4}\/\d{1,2}\/\d{1,2})[（(][月火水木金土日][）)]\s*[～〜ー-]\s*(\d{4}\/\d{1,2}\/\d{1,2})/;
-                                    const updateRegex = /更新日[：:]\s*(\d{4}\/\d{1,2}\/\d{1,2})/;
-
-                                    const periodMatch = dateText.match(periodRegex);
-                                    const updateMatch = dateText.match(updateRegex);
-
-                                    if (updateMatch) {
-                                        const parts = updateMatch[1].split('/');
-                                        jobPageUpdatedAt = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-                                    }
-                                    if (periodMatch) {
-                                        const parts = periodMatch[2].split('/');
-                                        jobPageEndDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-                                    }
-                                }
-
-                                // 検索結果に戻る
-                                await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
-                                await page.waitForTimeout(randomDelay(1000, 2000));
-                            } catch (navError) {
-                                log(`[doda] 詳細ページ取得エラー: ${navError}`);
-                            }
-                        }
 
                         jobs.push({
                             title: title?.trim() || '',
                             company: cardCompanyName.trim(),
                             rank,
-                            url: url || '',
+                            url: '',
                             source: 'doda',
-                            jobPageUpdatedAt,
-                            jobPageEndDate,
                         });
                     }
                 } catch {
@@ -413,126 +357,67 @@ export class UpdateEngine {
                 }
             }
 
-            log(`[doda] ${jobs.length}件の求人を検出`);
             return jobs;
-
         } catch (error: any) {
-            log(`[doda] エラー: ${error.message}`);
             return [];
         } finally {
             await page.close();
         }
     }
 
-    // リクナビNEXTで会社名検索
+    // リクナビNEXTで会社名検索（詳細ページ訪問を削除）
     private async scrapeRikunabiForCompany(
-        context: any,
+        context: BrowserContext,
         searchName: string,
         originalName: string,
         log: (msg: string) => void
     ): Promise<JobListing[]> {
         const page = await context.newPage();
-        // リクナビNEXTの検索URL
         const searchUrl = `https://next.rikunabi.com/rnc/docs/cp_s00890.jsp?keyword=${encodeURIComponent(searchName)}`;
-        log(`[Rikunabi] 検索: ${searchName}`);
 
         try {
             await page.addInitScript(() => {
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
             });
 
-            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-            await page.waitForTimeout(randomDelay(3000, 5000));
+            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+            await page.waitForTimeout(randomDelay(1500, 2500));
 
             const jobs: JobListing[] = [];
-            // 複数のセレクターを試行
-            const cardSelectors = [
-                'a[class*="Card"]',
-                '[class*="jobCard"]',
-                '[class*="JobCard"]',
-                '.rnn-jobCard',
-            ];
+            const cardSelectors = ['a[class*="Card"]', '[class*="jobCard"]', '[class*="JobCard"]'];
 
             let cards: any[] = [];
             for (const selector of cardSelectors) {
                 cards = await page.locator(selector).all();
-                if (cards.length > 0) {
-                    log(`[Rikunabi] セレクター ${selector} で ${cards.length}件のカードを検出`);
-                    break;
-                }
+                if (cards.length > 0) break;
             }
 
-            for (let i = 0; i < Math.min(cards.length, 10); i++) {
+            for (let i = 0; i < Math.min(cards.length, 5); i++) {
                 try {
                     const card = cards[i];
-                    // 会社名を複数セレクターで探す
                     let cardCompanyName: string | null = null;
-                    const companySelectors = [
-                        '[class*="companyName"]',
-                        '[class*="company"]',
-                        '.rnn-companyName',
-                    ];
+                    const companySelectors = ['[class*="companyName"]', '[class*="company"]'];
                     for (const sel of companySelectors) {
-                        cardCompanyName = await card.locator(sel).first().textContent({ timeout: 2000 }).catch(() => null);
+                        cardCompanyName = await card.locator(sel).first().textContent({ timeout: 1500 }).catch(() => null);
                         if (cardCompanyName) break;
                     }
 
                     if (cardCompanyName && this.isCompanyMatch(cardCompanyName.trim(), originalName)) {
                         let title: string | null = null;
-                        const titleSelectors = ['[class*="title"]', '[class*="Title"]', '.rnn-jobTitle'];
+                        const titleSelectors = ['[class*="title"]', '[class*="Title"]'];
                         for (const sel of titleSelectors) {
-                            title = await card.locator(sel).first().textContent({ timeout: 2000 }).catch(() => null);
+                            title = await card.locator(sel).first().textContent({ timeout: 1500 }).catch(() => null);
                             if (title) break;
                         }
 
-                        const url = await card.getAttribute('href').catch(() => '');
-
-                        // ランク判定
                         const rank = await this.classifyRikunabiCard(card, i, 1);
-
-                        // 詳細ページに移動して日付情報を取得
-                        let jobPageUpdatedAt: Date | null = null;
-                        if (url) {
-                            const fullUrl = url.startsWith('http') ? url : `https://next.rikunabi.com${url}`;
-                            try {
-                                await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
-                                await page.waitForTimeout(randomDelay(1500, 2500));
-
-                                // __NEXT_DATA__からdatePublishedを抽出
-                                const datePublished = await page.evaluate(() => {
-                                    const scriptTag = document.querySelector('script#__NEXT_DATA__');
-                                    if (!scriptTag?.textContent) return null;
-                                    try {
-                                        const data = JSON.parse(scriptTag.textContent);
-                                        const timestamp = data?.props?.pageProps?.job?.lettice?.letticeLogBase?.datePublished;
-                                        if (timestamp) return timestamp;
-                                        const jobData = data?.props?.pageProps?.jobData;
-                                        if (jobData?.datePublished) return jobData.datePublished;
-                                        return null;
-                                    } catch {
-                                        return null;
-                                    }
-                                });
-
-                                if (datePublished && typeof datePublished === 'number') {
-                                    jobPageUpdatedAt = new Date(datePublished);
-                                }
-
-                                // 検索結果に戻る
-                                await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
-                                await page.waitForTimeout(randomDelay(1000, 2000));
-                            } catch (navError) {
-                                log(`[Rikunabi] 詳細ページ取得エラー: ${navError}`);
-                            }
-                        }
 
                         jobs.push({
                             title: title?.trim() || '',
                             company: cardCompanyName.trim(),
                             rank,
-                            url: url || '',
+                            url: '',
                             source: 'rikunabi',
-                            jobPageUpdatedAt,
                         });
                     }
                 } catch {
@@ -540,18 +425,15 @@ export class UpdateEngine {
                 }
             }
 
-            log(`[Rikunabi] ${jobs.length}件の求人を検出`);
             return jobs;
-
         } catch (error: any) {
-            log(`[Rikunabi] エラー: ${error.message}`);
             return [];
         } finally {
             await page.close();
         }
     }
 
-    // 会社名の一致チェック（部分一致）
+    // 会社名の一致チェック
     private isCompanyMatch(cardName: string, searchName: string): boolean {
         const normalize = (s: string) => s
             .replace(/株式会社|有限会社|合同会社|（株）|\(株\)|㈱/g, '')
@@ -585,12 +467,9 @@ export class UpdateEngine {
     // dodaのランク判定
     private async classifyDodaCard(card: Locator, displayIndex: number): Promise<BudgetRank> {
         try {
-            // PR枠かどうかを複数の方法で判定
             const linkEl = card.locator('a[href*="/job/"]').first();
             const href = await linkEl.getAttribute('href').catch(() => '');
             const isPR = href?.includes('-tab__pr/') || href?.includes('/pr/') || false;
-
-            // PRラベルの有無も確認
             const hasPRLabel = await card.locator('[class*="pr"], [class*="PR"], [class*="premium"]').count() > 0;
 
             if (isPR || hasPRLabel) {
@@ -631,7 +510,6 @@ export class UpdateEngine {
     ): ScrapingResult {
         const allJobs = [...mynaviJobs, ...dodaJobs, ...rikunabiJobs];
 
-        // 最高ランクを採用
         const ranks = allJobs.map(j => j.rank);
         let bestRank: BudgetRank | null = null;
         if (ranks.includes('A')) {
@@ -642,7 +520,6 @@ export class UpdateEngine {
             bestRank = 'C';
         }
 
-        // 最新の求人ページ更新日を取得
         let latestJobPageUpdatedAt: Date | null = null;
         let latestJobPageEndDate: Date | null = null;
         for (const job of allJobs) {
@@ -676,7 +553,6 @@ export class UpdateEngine {
     private detectChanges(company: Company, newData: ScrapingResult): UpdateChanges {
         const changes: UpdateChanges = {};
 
-        // ランク変動検出
         if (company.budget_rank !== newData.rank && newData.rank !== null) {
             const rankOrder: Record<BudgetRank, number> = { 'A': 3, 'B': 2, 'C': 1 };
             const oldRankValue = company.budget_rank ? rankOrder[company.budget_rank] : 0;
@@ -689,7 +565,6 @@ export class UpdateEngine {
             };
         }
 
-        // 求人数変化検出
         const oldJobCount = company.job_count || 0;
         const newJobCount = newData.jobCount;
 
@@ -701,7 +576,6 @@ export class UpdateEngine {
             };
         }
 
-        // 掲載ステータス変化
         const isCurrentlyActive = newJobCount > 0;
         const wasActive = company.listing_status === '掲載中';
 
@@ -724,13 +598,11 @@ export class UpdateEngine {
         const updates: string[] = [];
         const params: any[] = [];
 
-        // 基本情報更新
         updates.push('last_updated_at = ?');
         params.push(new Date().toISOString());
 
         updates.push('update_count = update_count + 1');
 
-        // ランク更新
         if (changes.rank && changes.rank.new) {
             updates.push('last_rank = budget_rank');
             updates.push('budget_rank = ?');
@@ -739,23 +611,19 @@ export class UpdateEngine {
             params.push(new Date().toISOString());
         }
 
-        // 求人数更新
         updates.push('job_count = ?');
         params.push(newData.jobCount);
 
-        // ステータス更新
         if (changes.status) {
             updates.push('listing_status = ?');
             params.push(changes.status.new);
         }
 
-        // 最新求人タイトル
         if (newData.jobs.length > 0) {
             updates.push('latest_job_title = ?');
             params.push(newData.jobs[0].title);
         }
 
-        // 求人ページ更新日
         if (newData.latestJobPageUpdatedAt) {
             updates.push('job_page_updated_at = ?');
             params.push(newData.latestJobPageUpdatedAt.toISOString());
