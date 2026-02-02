@@ -75,7 +75,7 @@ export interface ScrapingOptions {
     jobTypes?: string[];     // 複数の職種カテゴリ
     rankFilter?: BudgetRank[];  // 保存対象のランク（空配列または未指定で全て保存）
     minSalary?: number;      // 年収下限（万円）
-    minEmployees?: number;   // 企業規模下限（人）
+    employeeRange?: string;  // 企業規模範囲（例: "50-100", "1000-"）
     maxJobUpdatedDays?: number;  // 求人更新日から何日以内
 }
 

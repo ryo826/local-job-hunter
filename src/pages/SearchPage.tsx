@@ -74,15 +74,16 @@ const salaryOptions = [
     { value: '1000', label: '1,000万円以上' },
 ];
 
-// 企業規模フィルターオプション
+// 企業規模フィルターオプション（範囲指定）
 const employeeOptions = [
     { value: 'all', label: '指定なし' },
-    { value: '10', label: '10人以上' },
-    { value: '50', label: '50人以上' },
-    { value: '100', label: '100人以上' },
-    { value: '300', label: '300人以上' },
-    { value: '500', label: '500人以上' },
-    { value: '1000', label: '1,000人以上' },
+    { value: '0-10', label: '0〜10人' },
+    { value: '10-50', label: '10〜50人' },
+    { value: '50-100', label: '50〜100人' },
+    { value: '100-300', label: '100〜300人' },
+    { value: '300-500', label: '300〜500人' },
+    { value: '500-1000', label: '500〜1,000人' },
+    { value: '1000-', label: '1,000人以上' },
 ];
 
 // 求人更新日フィルターオプション
@@ -275,7 +276,7 @@ export function SearchPage() {
             rankFilter: selectedRanks.size < 3 ? Array.from(selectedRanks) : undefined,
             // 追加フィルター
             minSalary: salaryFilter !== 'all' ? parseInt(salaryFilter) : undefined,
-            minEmployees: employeesFilter !== 'all' ? parseInt(employeesFilter) : undefined,
+            employeeRange: employeesFilter !== 'all' ? employeesFilter : undefined,
             maxJobUpdatedDays: jobUpdatedFilter !== 'all' ? parseInt(jobUpdatedFilter) : undefined,
         });
     };

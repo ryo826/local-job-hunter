@@ -64,6 +64,17 @@ function parseEmployees(employeesText: string | undefined | null): number | null
     return null;
 }
 
+// 従業員数が範囲内かチェック（例: "50-100", "1000-"）
+function matchesEmployeeRange(employees: number | null, range: string): boolean {
+    if (employees === null) return false;
+
+    const parts = range.split('-');
+    const min = parseInt(parts[0]) || 0;
+    const max = parts[1] ? parseInt(parts[1]) : Infinity;
+
+    return employees >= min && employees < max;
+}
+
 interface ScrapingOptions {
     sources: string[];
     keywords?: string;
@@ -72,7 +83,7 @@ interface ScrapingOptions {
     jobTypes?: string[];
     rankFilter?: BudgetRank[];
     minSalary?: number;
-    minEmployees?: number;
+    employeeRange?: string;  // 範囲指定（例: "50-100", "1000-"）
     maxJobUpdatedDays?: number;
 }
 
@@ -355,11 +366,11 @@ export class ScrapingEngine {
                     }
                 }
 
-                // 企業規模フィルター
-                if (options.minEmployees) {
+                // 企業規模フィルター（範囲指定）
+                if (options.employeeRange) {
                     const employees = parseEmployees(company.employees);
-                    if (employees === null || employees < options.minEmployees) {
-                        log(`企業規模フィルターでスキップ: ${company.company_name}`);
+                    if (!matchesEmployeeRange(employees, options.employeeRange)) {
+                        log(`企業規模フィルターでスキップ: ${company.company_name} (${employees ?? '不明'}人)`);
                         skippedCount++;
                         updateProgress();
                         return;
