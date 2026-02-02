@@ -762,14 +762,39 @@ export class RikunabiStrategy implements ScrapingStrategy {
 
         const allJobs: JobCardInfo[] = [];
 
+        // HTTP/2エラー対策: リトライロジック
+        let retries = 3;
+        let pageLoaded = false;
+
+        while (retries > 0 && !pageLoaded) {
+            try {
+                await page.addInitScript(() => {
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                });
+
+                await page.setExtraHTTPHeaders({
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+                    'Cache-Control': 'no-cache',
+                });
+
+                await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                await page.waitForTimeout(randomDelay(2000, 3000));
+                pageLoaded = true;
+            } catch (error: any) {
+                retries--;
+                log(`Error loading page (${3 - retries}/3): ${error.message}`);
+                if (retries > 0) {
+                    log(`Retrying in 3 seconds...`);
+                    await page.waitForTimeout(3000);
+                } else {
+                    log(`All retries failed.`);
+                    return allJobs;
+                }
+            }
+        }
+
         try {
-            await page.addInitScript(() => {
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            });
-
-            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-            await page.waitForTimeout(randomDelay(2000, 3000));
-
             // 総件数を取得
             if (onTotalCount) {
                 const countElement = page.locator('.styles_bodyText__KY7__, [class*="styles_bodyText"]').first();

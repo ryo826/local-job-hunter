@@ -877,16 +877,43 @@ export class MynaviStrategy implements ScrapingStrategy {
 
         const allJobs: JobCardInfo[] = [];
 
-        try {
-            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-            await page.waitForTimeout(randomDelay(1000, 2000));
+        // HTTP/2エラー対策: リトライロジック
+        let retries = 3;
+        let pageLoaded = false;
+        let cardSelector: string | null = null;
 
-            // カードセレクターを取得
-            const cardSelector = await this.waitForAnySelector(page, JOB_CARD_SELECTORS, 10000, log);
-            if (!cardSelector) {
-                log('No job cards found');
-                return allJobs;
+        while (retries > 0 && !pageLoaded) {
+            try {
+                await page.setExtraHTTPHeaders({
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+                    'Cache-Control': 'no-cache',
+                });
+
+                await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                await page.waitForTimeout(randomDelay(1000, 2000));
+
+                // カードセレクターを取得
+                cardSelector = await this.waitForAnySelector(page, JOB_CARD_SELECTORS, 10000, log);
+                if (!cardSelector) {
+                    log('No job cards found');
+                    return allJobs;
+                }
+                pageLoaded = true;
+            } catch (error: any) {
+                retries--;
+                log(`Error loading page (${3 - retries}/3): ${error.message}`);
+                if (retries > 0) {
+                    log(`Retrying in 3 seconds...`);
+                    await page.waitForTimeout(3000);
+                } else {
+                    log(`All retries failed.`);
+                    return allJobs;
+                }
             }
+        }
+
+        try {
 
             // 総件数を取得
             if (onTotalCount) {

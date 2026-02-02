@@ -134,7 +134,8 @@ export class ScrapingEngine {
                     '--no-sandbox',
                     '--disable-web-security',
                     '--disable-features=IsolateOrigins,site-per-process',
-                    '--disable-site-isolation-trials'
+                    '--disable-site-isolation-trials',
+                    '--disable-http2',  // HTTP/2プロトコルエラー対策
                 ]
             });
 
@@ -567,6 +568,8 @@ export class ScrapingEngine {
             locale: 'ja-JP',
             timezoneId: 'Asia/Tokyo',
             viewport: { width: 1920, height: 1080 },
+            ignoreHTTPSErrors: true,
+            bypassCSP: true,
         });
 
         try {

@@ -516,98 +516,120 @@ export class DodaStrategy implements ScrapingStrategy {
 
         const allJobs: JobCardInfo[] = [];
 
-        try {
-            await page.setExtraHTTPHeaders({
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
-            });
+        // HTTP/2エラー対策: リトライロジック
+        let retries = 3;
+        let pageLoaded = false;
 
-            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-            await page.waitForTimeout(randomDelay(2000, 3000));
+        while (retries > 0 && !pageLoaded) {
+            try {
+                await page.setExtraHTTPHeaders({
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache',
+                    'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131"',
+                    'Sec-Ch-Ua-Mobile': '?0',
+                    'Sec-Ch-Ua-Platform': '"Windows"',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Upgrade-Insecure-Requests': '1',
+                });
 
-            // 総件数を取得
-            if (onTotalCount) {
-                try {
-                    const countEl = page.locator('.search-sidebar__total-count__number').first();
-                    if (await countEl.count() > 0) {
-                        const text = await countEl.textContent();
-                        if (text) {
-                            const num = parseInt(text.replace(/,/g, ''), 10);
-                            if (!isNaN(num)) {
-                                log(`Total jobs: ${num}`);
-                                onTotalCount(num);
-                            }
+                await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                await page.waitForTimeout(randomDelay(2000, 3000));
+                pageLoaded = true;
+            } catch (error: any) {
+                retries--;
+                log(`Error loading page (${3 - retries}/3): ${error.message}`);
+                if (retries > 0) {
+                    log(`Retrying in 3 seconds...`);
+                    await page.waitForTimeout(3000);
+                } else {
+                    log(`All retries failed.`);
+                    return allJobs;
+                }
+            }
+        }
+
+        // 総件数を取得
+        if (onTotalCount) {
+            try {
+                const countEl = page.locator('.search-sidebar__total-count__number').first();
+                if (await countEl.count() > 0) {
+                    const text = await countEl.textContent();
+                    if (text) {
+                        const num = parseInt(text.replace(/,/g, ''), 10);
+                        if (!isNaN(num)) {
+                            log(`Total jobs: ${num}`);
+                            onTotalCount(num);
                         }
                     }
-                } catch (e) {
-                    log(`Failed to get total count: ${e}`);
+                }
+            } catch (e) {
+                log(`Failed to get total count: ${e}`);
+            }
+        }
+
+        let hasNext = true;
+        let pageNum = 0;
+        const maxPages = 500;  // 制限を緩和（実質無制限）
+
+        while (hasNext && pageNum < maxPages) {
+            pageNum++;
+            log(`Collecting URLs from page ${pageNum}...`);
+
+            await this.scrollToBottom(page, log);
+            const jobCards = await page.locator('.jobCard-card').all();
+            log(`Found ${jobCards.length} job cards on page ${pageNum}`);
+
+            for (let i = 0; i < jobCards.length; i++) {
+                try {
+                    const card = jobCards[i];
+                    const linkEl = card.locator('a.jobCard-header__link').first();
+                    const url = await linkEl.getAttribute('href');
+                    if (!url) continue;
+
+                    const fullUrl = url.startsWith('http') ? url : `https://doda.jp${url}`;
+
+                    const companyNameEl = card.locator('a.jobCard-header__link h2').first();
+                    const companyName = (await companyNameEl.textContent())?.trim() || '';
+
+                    const jobTitleEl = card.locator('a.jobCard-header__link p').first();
+                    const jobTitle = (await jobTitleEl.textContent())?.trim() || '';
+
+                    // ランク判定
+                    const isPR = url.includes('-tab__pr/') || url.includes('/pr/');
+                    const rank: BudgetRank = isPR ? 'A' : (i < 20 ? 'B' : 'C');
+
+                    allJobs.push({
+                        url: fullUrl,
+                        companyName,
+                        jobTitle,
+                        rank,
+                        displayIndex: (pageNum - 1) * 100 + i,
+                    });
+                } catch (err) {
+                    // 個別エラーは無視
                 }
             }
 
-            let hasNext = true;
-            let pageNum = 0;
-            const maxPages = 500;  // 制限を緩和（実質無制限）
-
-            while (hasNext && pageNum < maxPages) {
-                pageNum++;
-                log(`Collecting URLs from page ${pageNum}...`);
-
-                await this.scrollToBottom(page, log);
-                const jobCards = await page.locator('.jobCard-card').all();
-                log(`Found ${jobCards.length} job cards on page ${pageNum}`);
-
-                for (let i = 0; i < jobCards.length; i++) {
-                    try {
-                        const card = jobCards[i];
-                        const linkEl = card.locator('a.jobCard-header__link').first();
-                        const url = await linkEl.getAttribute('href');
-                        if (!url) continue;
-
-                        const fullUrl = url.startsWith('http') ? url : `https://doda.jp${url}`;
-
-                        const companyNameEl = card.locator('a.jobCard-header__link h2').first();
-                        const companyName = (await companyNameEl.textContent())?.trim() || '';
-
-                        const jobTitleEl = card.locator('a.jobCard-header__link p').first();
-                        const jobTitle = (await jobTitleEl.textContent())?.trim() || '';
-
-                        // ランク判定
-                        const isPR = url.includes('-tab__pr/') || url.includes('/pr/');
-                        const rank: BudgetRank = isPR ? 'A' : (i < 20 ? 'B' : 'C');
-
-                        allJobs.push({
-                            url: fullUrl,
-                            companyName,
-                            jobTitle,
-                            rank,
-                            displayIndex: (pageNum - 1) * 100 + i,
-                        });
-                    } catch (err) {
-                        // 個別エラーは無視
-                    }
-                }
-
-                // 次のページへ
-                const nextButton = page.locator('a:has-text("次のページ"), a:has-text("次へ"), a[rel="next"]').first();
-                if (await nextButton.count() > 0 && await nextButton.isVisible()) {
-                    try {
-                        await nextButton.click();
-                        await page.waitForTimeout(randomDelay(3000, 5000));
-                    } catch (error) {
-                        hasNext = false;
-                    }
-                } else {
+            // 次のページへ
+            const nextButton = page.locator('a:has-text("次のページ"), a:has-text("次へ"), a[rel="next"]').first();
+            if (await nextButton.count() > 0 && await nextButton.isVisible()) {
+                try {
+                    await nextButton.click();
+                    await page.waitForTimeout(randomDelay(3000, 5000));
+                } catch (error) {
                     hasNext = false;
                 }
+            } else {
+                hasNext = false;
             }
-
-            log(`Collected ${allJobs.length} job URLs from ${pageNum} pages`);
-            return allJobs;
-
-        } catch (error: any) {
-            log(`Error collecting URLs: ${error.message}`);
-            return allJobs;
         }
+
+        log(`Collected ${allJobs.length} job URLs from ${pageNum} pages`);
+        return allJobs;
     }
 
     // 並列スクレイピング用: 個別の詳細ページをスクレイピング
