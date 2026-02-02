@@ -1,6 +1,6 @@
 
 import { Page, Locator } from 'playwright';
-import { ScrapingStrategy, CompanyData, ScrapingParams, ScrapingCallbacks, BudgetRank } from './ScrapingStrategy';
+import { ScrapingStrategy, CompanyData, ScrapingParams, ScrapingCallbacks, BudgetRank, JobCardInfo } from './ScrapingStrategy';
 import { normalizeIndustry, normalizeArea, normalizeSalary, normalizeEmployees } from '../utils/data-normalizer';
 
 // ランダム待機時間のヘルパー関数
@@ -341,7 +341,7 @@ export class MynaviStrategy implements ScrapingStrategy {
 
         let hasNext = true;
         let pageNum = 0;
-        const maxPages = 10;
+        const maxPages = 500;  // 制限を緩和
         let currentSearchUrl = searchUrl;
 
         while (hasNext && pageNum < maxPages) {
@@ -864,6 +864,213 @@ export class MynaviStrategy implements ScrapingStrategy {
         } catch (error) {
             console.error('Failed to get total job count:', error);
             return undefined;
+        }
+    }
+
+    // 並列スクレイピング用: リストページから求人URLを一括収集
+    async collectJobUrls(page: Page, params: ScrapingParams, callbacks?: ScrapingCallbacks): Promise<JobCardInfo[]> {
+        const { onLog, onTotalCount } = callbacks || {};
+        const log = (msg: string) => onLog ? onLog(msg) : console.log(`[Mynavi] ${msg}`);
+
+        const searchUrl = this.buildSearchUrl(params);
+        log(`Collecting job URLs from: ${searchUrl}`);
+
+        const allJobs: JobCardInfo[] = [];
+
+        try {
+            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.waitForTimeout(randomDelay(1000, 2000));
+
+            // カードセレクターを取得
+            const cardSelector = await this.waitForAnySelector(page, JOB_CARD_SELECTORS, 10000, log);
+            if (!cardSelector) {
+                log('No job cards found');
+                return allJobs;
+            }
+
+            // 総件数を取得
+            if (onTotalCount) {
+                const countElement = page.locator('.js__searchRecruit--count').first();
+                if (await countElement.count() > 0) {
+                    const text = await countElement.textContent();
+                    if (text) {
+                        const num = parseInt(text.replace(/,/g, ''), 10);
+                        if (!isNaN(num)) {
+                            log(`Total jobs: ${num}`);
+                            onTotalCount(num);
+                        }
+                    }
+                }
+            }
+
+            let hasNext = true;
+            let pageNum = 0;
+            const maxPages = 500;
+
+            while (hasNext && pageNum < maxPages) {
+                pageNum++;
+                log(`Collecting URLs from page ${pageNum}...`);
+
+                const jobCards = await page.locator(cardSelector).all();
+                log(`Found ${jobCards.length} job cards on page ${pageNum}`);
+
+                if (jobCards.length === 0) break;
+
+                for (let i = 0; i < jobCards.length; i++) {
+                    try {
+                        const card = jobCards[i];
+
+                        // ランク判定
+                        const dataTy = await card.getAttribute('data-ty');
+                        const hasAttentionLabel = await card.locator('.cassetteRecruitRecommend__label--attention').count() > 0;
+                        const rank: BudgetRank = (dataTy === 'rzs' || hasAttentionLabel) ? 'A' : (pageNum === 1 ? 'B' : 'C');
+
+                        // URLを取得
+                        let url: string | null = null;
+                        for (const linkSelector of JOB_LINK_SELECTORS) {
+                            const linkEl = card.locator(linkSelector).first();
+                            if (await linkEl.count() > 0) {
+                                url = await linkEl.getAttribute('href');
+                                if (url) break;
+                            }
+                        }
+
+                        if (!url || url.includes('javascript:')) continue;
+
+                        // URL正規化
+                        let fullUrl: string;
+                        if (url.startsWith('http')) {
+                            fullUrl = url;
+                        } else if (url.startsWith('//')) {
+                            fullUrl = `https:${url}`;
+                        } else {
+                            fullUrl = `https://tenshoku.mynavi.jp${url.startsWith('/') ? '' : '/'}${url}`;
+                        }
+
+                        if (!fullUrl.includes('mynavi.jp')) continue;
+                        if (fullUrl.includes('/msg/')) {
+                            fullUrl = fullUrl.replace(/\/msg\/?$/, '/');
+                        }
+
+                        // 会社名を取得
+                        let companyName = '';
+                        for (const nameSelector of COMPANY_NAME_SELECTORS) {
+                            const nameEl = card.locator(nameSelector).first();
+                            if (await nameEl.count() > 0) {
+                                companyName = (await nameEl.textContent())?.trim() || '';
+                                if (companyName) break;
+                            }
+                        }
+
+                        // 求人タイトルを取得
+                        let jobTitle = '';
+                        for (const titleSelector of JOB_TITLE_SELECTORS) {
+                            const titleEl = card.locator(titleSelector).first();
+                            if (await titleEl.count() > 0) {
+                                jobTitle = (await titleEl.textContent())?.trim() || '';
+                                if (jobTitle) break;
+                            }
+                        }
+
+                        allJobs.push({
+                            url: fullUrl,
+                            companyName,
+                            jobTitle,
+                            rank,
+                            displayIndex: (pageNum - 1) * 50 + i,
+                        });
+                    } catch (err) {
+                        // 個別エラーは無視
+                    }
+                }
+
+                // 次のページへ
+                const nextButton = page.locator('a:has-text("次へ"), .pager__next a, a[rel="next"]').first();
+                if (await nextButton.count() > 0 && await nextButton.isVisible()) {
+                    try {
+                        await nextButton.click();
+                        await page.waitForTimeout(randomDelay(1500, 2500));
+                    } catch (error) {
+                        hasNext = false;
+                    }
+                } else {
+                    hasNext = false;
+                }
+            }
+
+            log(`Collected ${allJobs.length} job URLs from ${pageNum} pages`);
+            return allJobs;
+
+        } catch (error: any) {
+            log(`Error collecting URLs: ${error.message}`);
+            return allJobs;
+        }
+    }
+
+    // 並列スクレイピング用: 個別の詳細ページをスクレイピング
+    async scrapeJobDetail(page: Page, jobInfo: JobCardInfo, log?: (msg: string) => void): Promise<CompanyData | null> {
+        const logFn = log || ((msg: string) => console.log(`[Mynavi] ${msg}`));
+
+        try {
+            logFn(`Visiting: ${jobInfo.companyName}`);
+
+            await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+            await page.waitForTimeout(randomDelay(300, 700));
+
+            // 404チェック
+            const is404 = await page.locator('text=/404|ページが見つかりません|お探しのページは|掲載が終了/i').count() > 0;
+            if (is404) {
+                logFn('Page not found or job expired, skipping');
+                return null;
+            }
+
+            // 企業情報を抽出
+            const companyUrl = await this.extractCompanyUrl(page);
+            const address = await this.extractTableValue(page, '本社所在地') ||
+                await this.extractTableValue(page, '勤務地');
+            const industry = await this.extractTableValue(page, '事業内容') ||
+                await this.extractTableValue(page, '業種');
+            const employees = await this.extractTableValue(page, '従業員数');
+            const establishment = await this.extractTableValue(page, '設立');
+            const representative = await this.extractTableValue(page, '代表者');
+            const salaryText = await this.extractTableValue(page, '給与') ||
+                await this.extractTableValue(page, '年収');
+
+            // 会社名
+            let companyName = jobInfo.companyName;
+            if (!companyName) {
+                const pageCompanyEl = page.locator('.companyName, [class*="company-name"]').first();
+                if (await pageCompanyEl.count() > 0) {
+                    companyName = (await pageCompanyEl.textContent())?.trim() || '';
+                }
+            }
+
+            const normalizedAddress = this.normalizeAddress(address);
+            const cleanName = this.cleanCompanyName(companyName);
+
+            return {
+                source: this.source,
+                url: jobInfo.url,
+                company_name: cleanName,
+                job_title: jobInfo.jobTitle,
+                salary_text: normalizeSalary(salaryText),
+                representative,
+                establishment,
+                employees: normalizeEmployees(employees),
+                phone: undefined,
+                address: normalizedAddress,
+                area: normalizeArea(this.extractAreaFromAddress(normalizedAddress)),
+                homepage_url: companyUrl,
+                industry: normalizeIndustry(industry),
+                scrape_status: 'step1_completed',
+                budget_rank: jobInfo.rank,
+                rank_confidence: jobInfo.rank === 'A' ? 0.9 : (jobInfo.rank === 'B' ? 0.7 : 0.6),
+                job_page_updated_at: null,
+                job_page_end_date: null,
+            };
+        } catch (error: any) {
+            logFn(`Error scraping ${jobInfo.companyName}: ${error.message}`);
+            return null;
         }
     }
 }
