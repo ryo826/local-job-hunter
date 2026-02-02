@@ -48,6 +48,14 @@ export interface Company {
     budget_rank: BudgetRank | null;
     rank_confidence: number | null;
     rank_detected_at: string | null;
+    // 更新機能関連フィールド
+    last_updated_at: string | null;
+    update_count: number;
+    last_rank: BudgetRank | null;
+    rank_changed_at: string | null;
+    job_count: number;
+    latest_job_title: string | null;
+    listing_status: '掲載中' | '掲載終了';
 }
 
 export type CompanyFilters = {
@@ -74,6 +82,29 @@ export interface ScrapingProgress {
     totalJobs?: number;          // 検索条件に合った総求人件数
     estimatedMinutes?: number;   // 完了までの推定時間（分）
     startTime?: number;          // スクレイピング開始時刻
+}
+
+// 更新機能関連の型定義
+export interface UpdateProgress {
+    current: number;
+    total: number;
+    companyName: string;
+    status: string;
+    startTime?: number;
+}
+
+export interface UpdateChanges {
+    rank?: { old: BudgetRank | null; new: BudgetRank | null; direction?: 'upgrade' | 'downgrade' };
+    jobCount?: { old: number; new: number; delta: number };
+    status?: { old: string; new: string };
+}
+
+export interface UpdateResult {
+    companyId: number;
+    companyName: string;
+    changes: UpdateChanges;
+    updatedAt: string;
+    error?: string;
 }
 
 // 新規: Job型とJobFilters型をエクスポート
@@ -103,6 +134,14 @@ export interface IElectronAPI {
         startPhoneLookup: () => Promise<{ success: boolean; error?: string; updated?: number; total?: number }>;
         getStats: () => Promise<{ total: number; withPhone: number; withoutPhone: number }>;
         onProgress: (callback: (progress: { current: number; total: number; companyName: string }) => void) => void;
+        offProgress: () => void;
+        onLog: (callback: (message: string) => void) => void;
+        offLog: () => void;
+    };
+    update: {
+        startUpdate: (companyIds?: number[]) => Promise<{ success: boolean; error?: string; results?: UpdateResult[] }>;
+        stop: () => Promise<void>;
+        onProgress: (callback: (progress: UpdateProgress) => void) => void;
         offProgress: () => void;
         onLog: (callback: (message: string) => void) => void;
         offLog: () => void;

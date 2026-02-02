@@ -151,6 +151,9 @@ export function initDB() {
 
     // ランク関連カラムのマイグレーション
     migrateRankColumns(database);
+
+    // 更新機能関連カラムのマイグレーション
+    migrateUpdateColumns(database);
 }
 
 // ランク関連カラムを既存テーブルに追加するマイグレーション
@@ -179,6 +182,58 @@ function migrateRankColumns(database: Database.Database) {
 
     // budget_rank用のインデックスを作成
     database.exec(`CREATE INDEX IF NOT EXISTS idx_companies_budget_rank ON companies(budget_rank)`);
+}
+
+// 更新機能関連カラムを既存テーブルに追加するマイグレーション
+function migrateUpdateColumns(database: Database.Database) {
+    const tableInfo = database.prepare('PRAGMA table_info(companies)').all() as Array<{ name: string }>;
+    const existingColumns = new Set(tableInfo.map(col => col.name));
+
+    // last_updated_at: 最終更新日時
+    if (!existingColumns.has('last_updated_at')) {
+        console.log('[Database] Adding last_updated_at column to companies table');
+        database.exec(`ALTER TABLE companies ADD COLUMN last_updated_at DATETIME`);
+    }
+
+    // update_count: 更新回数
+    if (!existingColumns.has('update_count')) {
+        console.log('[Database] Adding update_count column to companies table');
+        database.exec(`ALTER TABLE companies ADD COLUMN update_count INTEGER DEFAULT 0`);
+    }
+
+    // last_rank: 前回のランク（変動検知用）
+    if (!existingColumns.has('last_rank')) {
+        console.log('[Database] Adding last_rank column to companies table');
+        database.exec(`ALTER TABLE companies ADD COLUMN last_rank TEXT CHECK(last_rank IN ('A', 'B', 'C'))`);
+    }
+
+    // rank_changed_at: ランク変動日時（migrateRankColumnsで追加されていない場合）
+    if (!existingColumns.has('rank_changed_at')) {
+        console.log('[Database] Adding rank_changed_at column to companies table');
+        database.exec(`ALTER TABLE companies ADD COLUMN rank_changed_at DATETIME`);
+    }
+
+    // job_count: 求人数
+    if (!existingColumns.has('job_count')) {
+        console.log('[Database] Adding job_count column to companies table');
+        database.exec(`ALTER TABLE companies ADD COLUMN job_count INTEGER DEFAULT 0`);
+    }
+
+    // latest_job_title: 最新求人タイトル
+    if (!existingColumns.has('latest_job_title')) {
+        console.log('[Database] Adding latest_job_title column to companies table');
+        database.exec(`ALTER TABLE companies ADD COLUMN latest_job_title TEXT`);
+    }
+
+    // listing_status: 掲載ステータス
+    if (!existingColumns.has('listing_status')) {
+        console.log('[Database] Adding listing_status column to companies table');
+        database.exec(`ALTER TABLE companies ADD COLUMN listing_status TEXT DEFAULT '掲載中' CHECK(listing_status IN ('掲載中', '掲載終了'))`);
+    }
+
+    // インデックス作成
+    database.exec(`CREATE INDEX IF NOT EXISTS idx_companies_last_updated_at ON companies(last_updated_at)`);
+    database.exec(`CREATE INDEX IF NOT EXISTS idx_companies_listing_status ON companies(listing_status)`);
 }
 
 // Repository Functions

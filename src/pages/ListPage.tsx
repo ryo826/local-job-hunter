@@ -127,7 +127,18 @@ const statusConfig: Record<string, { label: string; className: string }> = {
 };
 
 export function ListPage() {
-    const { companies, filters, setFilters, fetchCompanies, updateCompany } = useAppStore();
+    const {
+        companies,
+        filters,
+        setFilters,
+        fetchCompanies,
+        updateCompany,
+        isUpdateRunning,
+        updateProgress,
+        lastUpdateResults,
+        startUpdate,
+        stopUpdate,
+    } = useAppStore();
 
     const [searchQuery, setSearchQuery] = useState(filters.search || '');
     const [statusFilter, setStatusFilter] = useState(filters.status || 'all');
@@ -148,6 +159,9 @@ export function ListPage() {
     // Delete state
     const [isDeleting, setIsDeleting] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+    // Update results dialog state
+    const [showUpdateResults, setShowUpdateResults] = useState(false);
 
     // Column filters
     const [industryFilter, setIndustryFilter] = useState<string>('all');
@@ -609,6 +623,67 @@ export function ListPage() {
                             </>
                         )}
                     </Button>
+                    {/* Update Buttons */}
+                    {selectedRows.size > 0 ? (
+                        <Button
+                            variant="default"
+                            size="sm"
+                            className="rounded-xl bg-blue-600 hover:bg-blue-700"
+                            onClick={() => startUpdate(Array.from(selectedRows)).then((results) => {
+                                if (results && results.length > 0) {
+                                    setShowUpdateResults(true);
+                                }
+                            })}
+                            disabled={isUpdateRunning}
+                        >
+                            {isUpdateRunning ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                                    更新中...
+                                </>
+                            ) : (
+                                <>
+                                    <RefreshCw className="h-4 w-4 mr-1.5" />
+                                    選択更新 ({selectedRows.size})
+                                </>
+                            )}
+                        </Button>
+                    ) : (
+                        <Button
+                            variant="default"
+                            size="sm"
+                            className="rounded-xl bg-blue-600 hover:bg-blue-700"
+                            onClick={() => startUpdate().then((results) => {
+                                if (results && results.length > 0) {
+                                    setShowUpdateResults(true);
+                                }
+                            })}
+                            disabled={isUpdateRunning || companies.length === 0}
+                        >
+                            {isUpdateRunning ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                                    更新中...
+                                </>
+                            ) : (
+                                <>
+                                    <RefreshCw className="h-4 w-4 mr-1.5" />
+                                    全件更新
+                                </>
+                            )}
+                        </Button>
+                    )}
+                    {isUpdateRunning && (
+                        <Button
+                            variant="destructive"
+                            size="sm"
+                            className="rounded-xl"
+                            onClick={stopUpdate}
+                        >
+                            <X className="h-4 w-4 mr-1.5" />
+                            停止
+                        </Button>
+                    )}
                     <Button
                         variant="ghost"
                         size="icon"
@@ -677,6 +752,29 @@ export function ListPage() {
                     >
                         選択解除
                     </Button>
+                </div>
+            )}
+
+            {/* Update Progress Bar */}
+            {isUpdateRunning && updateProgress && (
+                <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800">
+                    <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                            更新中: {updateProgress.companyName}
+                        </span>
+                        <span className="text-sm text-blue-600 dark:text-blue-400">
+                            {updateProgress.current}/{updateProgress.total} 件
+                        </span>
+                    </div>
+                    <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-2.5">
+                        <div
+                            className="bg-blue-600 dark:bg-blue-400 h-2.5 rounded-full transition-all duration-300"
+                            style={{ width: `${(updateProgress.current / updateProgress.total) * 100}%` }}
+                        />
+                    </div>
+                    <p className="text-xs text-blue-500 dark:text-blue-400 mt-1">
+                        {updateProgress.status}
+                    </p>
                 </div>
             )}
 
@@ -1118,6 +1216,96 @@ export function ListPage() {
                             ) : (
                                 '削除する'
                             )}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Update Results Dialog */}
+            <Dialog open={showUpdateResults} onOpenChange={setShowUpdateResults}>
+                <DialogContent className="rounded-2xl max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+                    <DialogHeader>
+                        <DialogTitle>更新結果</DialogTitle>
+                        <DialogDescription>
+                            {lastUpdateResults?.length || 0} 件の企業データを更新しました
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex-1 overflow-y-auto mt-4 space-y-3">
+                        {lastUpdateResults?.filter(r =>
+                            r.changes.rank || r.changes.jobCount || r.changes.status
+                        ).map((result) => (
+                            <div
+                                key={result.companyId}
+                                className={cn(
+                                    'p-3 rounded-xl border',
+                                    result.error
+                                        ? 'bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800'
+                                        : 'bg-muted/50 border-border'
+                                )}
+                            >
+                                <div className="font-medium">{result.companyName}</div>
+                                {result.error ? (
+                                    <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                                        エラー: {result.error}
+                                    </p>
+                                ) : (
+                                    <div className="flex flex-wrap gap-2 mt-2">
+                                        {result.changes.rank && (
+                                            <Badge
+                                                className={cn(
+                                                    'text-xs',
+                                                    result.changes.rank.direction === 'upgrade'
+                                                        ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                                                        : 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300'
+                                                )}
+                                            >
+                                                ランク: {result.changes.rank.old || '-'} → {result.changes.rank.new || '-'}
+                                                {result.changes.rank.direction === 'upgrade' ? ' ↑' : ' ↓'}
+                                            </Badge>
+                                        )}
+                                        {result.changes.jobCount && (
+                                            <Badge
+                                                className={cn(
+                                                    'text-xs',
+                                                    result.changes.jobCount.delta > 0
+                                                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+                                                        : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                                                )}
+                                            >
+                                                求人数: {result.changes.jobCount.old} → {result.changes.jobCount.new}
+                                                {result.changes.jobCount.delta > 0 ? ` (+${result.changes.jobCount.delta})` : ` (${result.changes.jobCount.delta})`}
+                                            </Badge>
+                                        )}
+                                        {result.changes.status && (
+                                            <Badge
+                                                className={cn(
+                                                    'text-xs',
+                                                    result.changes.status.new === '掲載終了'
+                                                        ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
+                                                        : 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                                                )}
+                                            >
+                                                {result.changes.status.old} → {result.changes.status.new}
+                                            </Badge>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                        {lastUpdateResults?.filter(r =>
+                            r.changes.rank || r.changes.jobCount || r.changes.status
+                        ).length === 0 && (
+                            <div className="text-center py-8 text-muted-foreground">
+                                変更のあった企業はありませんでした
+                            </div>
+                        )}
+                    </div>
+                    <div className="flex justify-end mt-4 pt-4 border-t">
+                        <Button
+                            className="rounded-xl"
+                            onClick={() => setShowUpdateResults(false)}
+                        >
+                            閉じる
                         </Button>
                     </div>
                 </DialogContent>

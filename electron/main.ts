@@ -31,6 +31,7 @@ if (process.platform === 'win32') {
 }
 import { initDB, companyRepository } from './database';
 import { ScrapingEngine } from './scraping-engine';
+import { UpdateEngine } from './update-engine';
 import { getExportService } from './services/ExportService';
 
 // Load environment variables from .env file
@@ -80,6 +81,7 @@ console.log('[Main] GOOGLE_MAPS_API_KEY set:', !!process.env.GOOGLE_MAPS_API_KEY
 
 let mainWindow: BrowserWindow | null = null;
 let scrapingEngine: ScrapingEngine | null = null;
+let updateEngine: UpdateEngine | null = null;
 
 function createWindow(): void {
     mainWindow = new BrowserWindow({
@@ -254,4 +256,38 @@ ipcMain.handle('enrich:getStats', async () => {
         withPhone: withPhone.length,
         withoutPhone: withoutPhone.length,
     };
+});
+
+// Update Engine Handlers
+ipcMain.handle('update:start', async (_event, companyIds?: number[]) => {
+    if (updateEngine) {
+        return { success: false, error: 'Update already in progress' };
+    }
+
+    updateEngine = new UpdateEngine();
+
+    try {
+        const result = await updateEngine.start(
+            companyIds,
+            (progress) => {
+                mainWindow?.webContents.send('update:progress', progress);
+            },
+            (message) => {
+                mainWindow?.webContents.send('update:log', message);
+            }
+        );
+        return result;
+    } catch (error) {
+        return { success: false, error: String(error) };
+    } finally {
+        updateEngine = null;
+    }
+});
+
+ipcMain.handle('update:stop', async () => {
+    if (updateEngine) {
+        await updateEngine.stop();
+        updateEngine = null;
+    }
+    return { success: true };
 });
