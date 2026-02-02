@@ -1,8 +1,17 @@
 
-import { Page } from 'playwright';
+import { Page, BrowserContext } from 'playwright';
 
 // ランク型定義
 export type BudgetRank = 'A' | 'B' | 'C';
+
+// 求人カード情報（リストページから取得）
+export interface JobCardInfo {
+    url: string;
+    companyName: string;
+    jobTitle?: string;
+    rank?: BudgetRank;
+    displayIndex: number;
+}
 
 export interface CompanyData {
     company_name: string;
@@ -51,4 +60,8 @@ export interface ScrapingStrategy {
     login?(page: Page): Promise<void>;
     scrape(page: Page, params: ScrapingParams, callbacks?: ScrapingCallbacks): AsyncGenerator<CompanyData>;
     getTotalJobCount?(page: Page, params: ScrapingParams): Promise<number | undefined>;
+
+    // 並列スクレイピング用メソッド（オプショナル）
+    collectJobUrls?(page: Page, params: ScrapingParams, callbacks?: ScrapingCallbacks): Promise<JobCardInfo[]>;
+    scrapeJobDetail?(page: Page, jobInfo: JobCardInfo, log?: (msg: string) => void): Promise<CompanyData | null>;
 }

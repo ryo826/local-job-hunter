@@ -1,5 +1,5 @@
-import { Page, Locator } from 'playwright';
-import { ScrapingStrategy, CompanyData, ScrapingParams, ScrapingCallbacks, BudgetRank } from './ScrapingStrategy';
+import { Page, Locator, BrowserContext } from 'playwright';
+import { ScrapingStrategy, CompanyData, ScrapingParams, ScrapingCallbacks, BudgetRank, JobCardInfo } from './ScrapingStrategy';
 import { normalizeIndustry, normalizeArea, normalizeSalary, normalizeEmployees } from '../utils/data-normalizer';
 
 // ランダム待機時間のヘルパー関数
@@ -504,6 +504,201 @@ export class DodaStrategy implements ScrapingStrategy {
         }
 
         log(`Completed scraping ${pageNum} pages`);
+    }
+
+    // 並列スクレイピング用: リストページから求人URLを一括収集
+    async collectJobUrls(page: Page, params: ScrapingParams, callbacks?: ScrapingCallbacks): Promise<JobCardInfo[]> {
+        const { onLog, onTotalCount } = callbacks || {};
+        const log = (msg: string) => onLog ? onLog(msg) : console.log(`[Doda] ${msg}`);
+
+        const searchUrl = this.buildSearchUrl(params);
+        log(`Collecting job URLs from: ${searchUrl}`);
+
+        const allJobs: JobCardInfo[] = [];
+
+        try {
+            await page.setExtraHTTPHeaders({
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+            });
+
+            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.waitForTimeout(randomDelay(2000, 3000));
+
+            // 総件数を取得
+            if (onTotalCount) {
+                try {
+                    const countEl = page.locator('.search-sidebar__total-count__number').first();
+                    if (await countEl.count() > 0) {
+                        const text = await countEl.textContent();
+                        if (text) {
+                            const num = parseInt(text.replace(/,/g, ''), 10);
+                            if (!isNaN(num)) {
+                                log(`Total jobs: ${num}`);
+                                onTotalCount(num);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    log(`Failed to get total count: ${e}`);
+                }
+            }
+
+            let hasNext = true;
+            let pageNum = 0;
+            const maxPages = 10;
+
+            while (hasNext && pageNum < maxPages) {
+                pageNum++;
+                log(`Collecting URLs from page ${pageNum}...`);
+
+                await this.scrollToBottom(page, log);
+                const jobCards = await page.locator('.jobCard-card').all();
+                log(`Found ${jobCards.length} job cards on page ${pageNum}`);
+
+                for (let i = 0; i < jobCards.length; i++) {
+                    try {
+                        const card = jobCards[i];
+                        const linkEl = card.locator('a.jobCard-header__link').first();
+                        const url = await linkEl.getAttribute('href');
+                        if (!url) continue;
+
+                        const fullUrl = url.startsWith('http') ? url : `https://doda.jp${url}`;
+
+                        const companyNameEl = card.locator('a.jobCard-header__link h2').first();
+                        const companyName = (await companyNameEl.textContent())?.trim() || '';
+
+                        const jobTitleEl = card.locator('a.jobCard-header__link p').first();
+                        const jobTitle = (await jobTitleEl.textContent())?.trim() || '';
+
+                        // ランク判定
+                        const isPR = url.includes('-tab__pr/') || url.includes('/pr/');
+                        const rank: BudgetRank = isPR ? 'A' : (i < 20 ? 'B' : 'C');
+
+                        allJobs.push({
+                            url: fullUrl,
+                            companyName,
+                            jobTitle,
+                            rank,
+                            displayIndex: (pageNum - 1) * 100 + i,
+                        });
+                    } catch (err) {
+                        // 個別エラーは無視
+                    }
+                }
+
+                // 次のページへ
+                const nextButton = page.locator('a:has-text("次のページ"), a:has-text("次へ"), a[rel="next"]').first();
+                if (await nextButton.count() > 0 && await nextButton.isVisible()) {
+                    try {
+                        await nextButton.click();
+                        await page.waitForTimeout(randomDelay(3000, 5000));
+                    } catch (error) {
+                        hasNext = false;
+                    }
+                } else {
+                    hasNext = false;
+                }
+            }
+
+            log(`Collected ${allJobs.length} job URLs from ${pageNum} pages`);
+            return allJobs;
+
+        } catch (error: any) {
+            log(`Error collecting URLs: ${error.message}`);
+            return allJobs;
+        }
+    }
+
+    // 並列スクレイピング用: 個別の詳細ページをスクレイピング
+    async scrapeJobDetail(page: Page, jobInfo: JobCardInfo, log?: (msg: string) => void): Promise<CompanyData | null> {
+        const logFn = log || ((msg: string) => console.log(`[Doda] ${msg}`));
+
+        try {
+            logFn(`Visiting: ${jobInfo.companyName}`);
+
+            await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+            await page.waitForTimeout(randomDelay(1500, 2500));
+
+            // 404チェック
+            const is404 = await page.locator('text=/404|ページが見つかりません/i').count() > 0;
+            if (is404) {
+                logFn('404 page detected, skipping');
+                return null;
+            }
+
+            // 詳細ページに遷移
+            let jobDetailUrl = jobInfo.url;
+            if (!jobInfo.url.includes('-fm__jobdetail')) {
+                if (jobInfo.url.includes('-tab__')) {
+                    jobDetailUrl = jobInfo.url.replace(/-tab__[a-z]+\/?$/, '-tab__jd/-fm__jobdetail/');
+                } else {
+                    jobDetailUrl = jobInfo.url.replace(/\/?$/, '/-tab__jd/-fm__jobdetail/');
+                }
+                jobDetailUrl = jobDetailUrl.replace(/\/+/g, '/').replace(':/', '://');
+
+                await page.goto(jobDetailUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+                await page.waitForTimeout(randomDelay(1000, 2000));
+            }
+
+            // スクロールして会社概要を読み込み
+            await page.evaluate(async () => {
+                const scrollStep = 800;
+                let currentPosition = 0;
+                const maxScroll = document.body.scrollHeight;
+                while (currentPosition < maxScroll) {
+                    currentPosition += scrollStep;
+                    window.scrollTo(0, currentPosition);
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+            });
+            await page.waitForTimeout(1000);
+
+            // 企業情報を抽出
+            const companyUrl = await this.extractCompanyUrl(page, logFn);
+            const address = await this.extractDescriptionValue(page, '本社所在地') ||
+                await this.extractDescriptionValue(page, '所在地');
+            const industry = await this.extractDescriptionValue(page, '事業概要') ||
+                await this.extractDescriptionValue(page, '事業内容');
+            const employees = await this.extractDescriptionValue(page, '従業員数');
+            const establishment = await this.extractDescriptionValue(page, '設立');
+            const representative = await this.extractDescriptionValue(page, '代表者');
+            const revenue = await this.extractDescriptionValue(page, '売上高');
+            const salaryText = await this.extractDescriptionValue(page, '給与') ||
+                await this.extractDescriptionValue(page, '年収');
+
+            const normalizedAddress = this.normalizeAddress(address);
+            const cleanName = this.cleanCompanyName(jobInfo.companyName);
+
+            // 日付情報
+            const jobDates = await extractDodaJobDates(page);
+
+            return {
+                source: this.source,
+                url: jobInfo.url,
+                company_name: cleanName,
+                job_title: jobInfo.jobTitle,
+                salary_text: normalizeSalary(salaryText),
+                representative,
+                establishment,
+                employees: normalizeEmployees(employees),
+                revenue,
+                phone: undefined,
+                address: normalizedAddress,
+                area: normalizeArea(this.extractAreaFromAddress(normalizedAddress)),
+                homepage_url: companyUrl,
+                industry: normalizeIndustry(industry),
+                scrape_status: 'step1_completed',
+                budget_rank: jobInfo.rank,
+                rank_confidence: jobInfo.rank === 'A' ? 0.9 : (jobInfo.rank === 'B' ? 0.7 : 0.6),
+                job_page_updated_at: jobDates.updateDate?.toISOString() || null,
+                job_page_start_date: jobDates.periodStart?.toISOString() || null,
+                job_page_end_date: jobDates.periodEnd?.toISOString() || null,
+            };
+        } catch (error: any) {
+            logFn(`Error scraping ${jobInfo.companyName}: ${error.message}`);
+            return null;
+        }
     }
 
     // リストページの求人カードから情報を抽出

@@ -1,6 +1,6 @@
 import { chromium, Browser, Page, BrowserContext } from 'playwright';
 import { companyRepository } from './database';
-import { ScrapingStrategy, ScrapingParams, CompanyData, BudgetRank } from './strategies/ScrapingStrategy';
+import { ScrapingStrategy, ScrapingParams, CompanyData, BudgetRank, JobCardInfo } from './strategies/ScrapingStrategy';
 import { JobRepository } from './repositories/JobRepository';
 import { ScrapingLogRepository } from './repositories/ScrapingLogRepository';
 import { UpsertService } from './services/UpsertService';
@@ -274,9 +274,21 @@ export class ScrapingEngine {
         let newCount = 0;
         let duplicateCount = 0;
         let skippedCount = 0;
-        let current = 0;
         let totalJobs: number | undefined = undefined;
         const scrapeStartTime = Date.now();
+
+        // 並列スクレイピングをサポートするか確認
+        const supportsParallel = typeof strategy.collectJobUrls === 'function' &&
+            typeof strategy.scrapeJobDetail === 'function';
+
+        if (supportsParallel) {
+            log(`並列スクレイピングモード (${PARALLEL_WORKERS}ページ同時)`);
+            await this.scrapeSourceParallel(strategy, params, options, onProgress, log);
+            return;
+        }
+
+        // フォールバック: 従来の順次スクレイピング
+        log('順次スクレイピングモード (フォールバック)');
 
         // メインコンテキストを作成
         const context = await this.browser.newContext({
@@ -334,7 +346,7 @@ export class ScrapingEngine {
                     newCount,
                     duplicateCount,
                     source: strategy.source,
-                    status: `スクレイピング中... (${PARALLEL_WORKERS}並列)`,
+                    status: `スクレイピング中...`,
                     totalJobs,
                     estimatedMinutes,
                     startTime: scrapeStartTime,
@@ -504,6 +516,236 @@ export class ScrapingEngine {
                 durationMs,
                 scrapedAt: new Date().toISOString()
             });
+        }
+    }
+
+    // 真の並列スクレイピング（複数ブラウザページを同時使用）
+    private async scrapeSourceParallel(
+        strategy: ScrapingStrategy,
+        params: ScrapingParams,
+        options: ScrapingOptions,
+        onProgress: (progress: ScrapingProgress) => void,
+        log: (msg: string) => void
+    ): Promise<void> {
+        if (!this.browser) return;
+        if (!strategy.collectJobUrls || !strategy.scrapeJobDetail) return;
+
+        const startTime = Date.now();
+        let newCount = 0;
+        let duplicateCount = 0;
+        let skippedCount = 0;
+        let totalJobs: number | undefined = undefined;
+        const scrapeStartTime = Date.now();
+
+        // メインコンテキスト（URL収集用）
+        const mainContext = await this.browser.newContext({
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            locale: 'ja-JP',
+            timezoneId: 'Asia/Tokyo',
+            viewport: { width: 1920, height: 1080 },
+        });
+
+        try {
+            const mainPage = await mainContext.newPage();
+
+            // Step 1: URL収集（高速）
+            log('Step 1: 求人URLを収集中...');
+            onProgress({
+                current: 0, total: 0, newCount: 0, duplicateCount: 0,
+                source: strategy.source,
+                status: '求人URLを収集中...',
+            });
+
+            const onTotalCount = (count: number) => {
+                totalJobs = count;
+            };
+
+            const jobUrls = await strategy.collectJobUrls(mainPage, params, { onLog: log, onTotalCount });
+            log(`${jobUrls.length}件のURLを収集完了`);
+
+            await mainPage.close();
+            await mainContext.close();
+
+            if (jobUrls.length === 0) {
+                log('収集されたURLがありません');
+                return;
+            }
+
+            // Step 2: 並列で詳細ページをスクレイピング
+            log(`Step 2: ${PARALLEL_WORKERS}ページ並列で詳細をスクレイピング...`);
+
+            // 進捗更新
+            const updateProgress = () => {
+                const elapsedMs = Date.now() - scrapeStartTime;
+                const processed = newCount + duplicateCount + skippedCount;
+                const avgTimePerJob = processed > 0 ? elapsedMs / processed : 2000;
+                const remainingJobs = Math.max(0, jobUrls.length - processed);
+                const estimatedMinutes = Math.ceil((remainingJobs * avgTimePerJob) / 60000 / PARALLEL_WORKERS);
+
+                onProgress({
+                    current: processed,
+                    total: jobUrls.length,
+                    newCount,
+                    duplicateCount,
+                    source: strategy.source,
+                    status: `並列スクレイピング中... (${PARALLEL_WORKERS}ページ同時)`,
+                    totalJobs: jobUrls.length,
+                    estimatedMinutes,
+                    startTime: scrapeStartTime,
+                });
+            };
+
+            // 会社データを処理する関数
+            const processCompany = async (company: CompanyData): Promise<void> => {
+                // ランクフィルター
+                if (options.rankFilter && options.rankFilter.length > 0) {
+                    if (!company.budget_rank || !options.rankFilter.includes(company.budget_rank)) {
+                        skippedCount++;
+                        updateProgress();
+                        return;
+                    }
+                }
+
+                // 給与フィルター
+                if (options.minSalary) {
+                    const salary = parseSalary(company.salary_text);
+                    if (salary === null || salary < options.minSalary) {
+                        skippedCount++;
+                        updateProgress();
+                        return;
+                    }
+                }
+
+                // 企業規模フィルター
+                if (options.employeeRange) {
+                    const employees = parseEmployees(company.employees);
+                    if (!matchesEmployeeRange(employees, options.employeeRange)) {
+                        skippedCount++;
+                        updateProgress();
+                        return;
+                    }
+                }
+
+                // 重複チェック
+                const existsByName = companyRepository.existsByName(company.company_name);
+                if (existsByName) {
+                    duplicateCount++;
+                    updateProgress();
+                    return;
+                }
+
+                // 保存
+                newCount++;
+                companyRepository.safeUpsert(company as any);
+
+                // 電話番号取得（バックグラウンド）
+                if (!company.phone) {
+                    const googleMapsService = getGoogleMapsService();
+                    if (googleMapsService) {
+                        googleMapsService.findCompanyPhone(company.company_name, company.address)
+                            .then(phone => {
+                                if (phone) {
+                                    const savedCompany = companyRepository.getByName(company.company_name);
+                                    if (savedCompany) {
+                                        companyRepository.update(savedCompany.id, { phone });
+                                    }
+                                }
+                            })
+                            .catch(() => {});
+                    }
+                }
+
+                // Job型に変換して保存
+                try {
+                    const job = DataConverter.companyDataToJob(company);
+                    this.upsertService.upsert(job);
+                } catch (error) {
+                    console.error(`Failed to convert/save job:`, error);
+                }
+
+                updateProgress();
+            };
+
+            // 並列ワーカー用のコンテキストとページを作成
+            const workerContexts: any[] = [];
+            const workerPages: any[] = [];
+
+            for (let i = 0; i < PARALLEL_WORKERS; i++) {
+                const ctx = await this.browser!.newContext({
+                    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                    locale: 'ja-JP',
+                    timezoneId: 'Asia/Tokyo',
+                    viewport: { width: 1920, height: 1080 },
+                });
+                const page = await ctx.newPage();
+                workerContexts.push(ctx);
+                workerPages.push(page);
+            }
+
+            // ジョブキュー
+            let jobIndex = 0;
+            const getNextJob = () => {
+                if (jobIndex >= jobUrls.length) return null;
+                return jobUrls[jobIndex++];
+            };
+
+            // 並列ワーカー
+            const workerPromises = workerPages.map(async (page, workerIdx) => {
+                while (!this.shouldStop) {
+                    const jobInfo = getNextJob();
+                    if (!jobInfo) break;
+
+                    try {
+                        const company = await strategy.scrapeJobDetail!(
+                            page,
+                            jobInfo,
+                            (msg) => log(`[W${workerIdx}] ${msg}`)
+                        );
+
+                        if (company) {
+                            await processCompany(company);
+                        } else {
+                            skippedCount++;
+                            updateProgress();
+                        }
+                    } catch (error: any) {
+                        log(`[W${workerIdx}] Error: ${error.message}`);
+                        skippedCount++;
+                        updateProgress();
+                    }
+                }
+            });
+
+            // 全ワーカーの完了を待つ
+            await Promise.all(workerPromises);
+
+            // クリーンアップ
+            for (const page of workerPages) {
+                await page.close().catch(() => {});
+            }
+            for (const ctx of workerContexts) {
+                await ctx.close().catch(() => {});
+            }
+
+            const durationMs = Date.now() - startTime;
+            log(`完了: ${newCount}件新規, ${duplicateCount}件重複, ${skippedCount}件スキップ (${Math.round(durationMs / 1000)}秒)`);
+
+            // ログ記録
+            this.logRepo.insert({
+                scrapeType: 'full',
+                source: strategy.source as 'mynavi' | 'doda' | 'rikunabi',
+                status: 'success',
+                jobsFound: jobUrls.length,
+                newJobs: newCount,
+                updatedJobs: 0,
+                errors: skippedCount,
+                durationMs,
+                scrapedAt: new Date().toISOString()
+            });
+
+        } catch (e: any) {
+            console.error(`Parallel scraping error:`, e);
+            log(`エラー: ${e.message}`);
         }
     }
 
