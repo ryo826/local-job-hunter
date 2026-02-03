@@ -666,42 +666,96 @@ export class MynaviStrategy implements ScrapingStrategy {
 
     // 企業URLを抽出（複数箇所をチェック）
     private async extractCompanyUrl(page: Page): Promise<string | undefined> {
-        // 優先順位1: 企業ホームページのテーブル行から取得
-        // HTMLの実際の構造: <th>企業ホームページ</th><td><a>https://example.com/</a></td>
-        // ※hrefはマイナビのリダイレクトURL、テキストが実際のURL
-        const homepageRow = page.locator('th.jobOfferTable__head:has-text("企業ホームページ")').first();
-        if (await homepageRow.count() > 0) {
-            const tdEl = homepageRow.locator('~ td').first();
-            if (await tdEl.count() > 0) {
-                const linkEl = tdEl.locator('a').first();
-                if (await linkEl.count() > 0) {
-                    // リンクのテキスト内容が実際のURL
-                    const urlText = (await linkEl.textContent())?.trim();
-                    if (urlText && urlText.startsWith('http')) {
-                        return urlText;
+        try {
+            // 方法1: 企業ホームページのテーブル行から取得
+            // HTMLの実際の構造: <th>企業ホームページ</th><td><a>https://example.com/</a></td>
+            const homepageRow = page.locator('th.jobOfferTable__head:has-text("企業ホームページ")').first();
+            if (await homepageRow.count() > 0) {
+                const tdEl = homepageRow.locator('~ td').first();
+                if (await tdEl.count() > 0) {
+                    const linkEl = tdEl.locator('a').first();
+                    if (await linkEl.count() > 0) {
+                        // リンクのテキスト内容が実際のURL
+                        const urlText = (await linkEl.textContent())?.trim();
+                        if (urlText && urlText.startsWith('http')) {
+                            return urlText;
+                        }
+                        // hrefからも試す（リダイレクトURLの場合があるため最終手段）
+                        const href = await linkEl.getAttribute('href');
+                        if (href && !href.includes('mynavi.jp') && href.startsWith('http')) {
+                            return href;
+                        }
                     }
                 }
             }
-        }
 
-        // 優先順位2: 一般的な企業ホームページリンク
-        const homepageLink = page.locator('a:has-text("企業ホームページ"), a:has-text("コーポレートサイト")').first();
-        if (await homepageLink.count() > 0) {
-            // テキスト内容がURLの場合
-            const text = (await homepageLink.textContent())?.trim();
-            if (text && text.startsWith('http')) {
-                return text;
+            // 方法2: 会社概要テーブルの「企業HP」「HP」行
+            const hpLabels = ['企業HP', 'HP', 'ホームページ', 'URL', '公式サイト', 'WEBサイト'];
+            for (const label of hpLabels) {
+                const labelEl = page.locator(`th:has-text("${label}"), dt:has-text("${label}")`).first();
+                if (await labelEl.count() > 0) {
+                    const valueEl = labelEl.locator('~ td, ~ dd').first();
+                    if (await valueEl.count() > 0) {
+                        const linkEl = valueEl.locator('a').first();
+                        if (await linkEl.count() > 0) {
+                            const urlText = (await linkEl.textContent())?.trim();
+                            if (urlText && urlText.startsWith('http') && !urlText.includes('mynavi.jp')) {
+                                return urlText;
+                            }
+                        }
+                        // リンクがない場合、テキストがURLかもしれない
+                        const text = (await valueEl.textContent())?.trim();
+                        if (text && text.startsWith('http') && !text.includes('mynavi.jp')) {
+                            return text;
+                        }
+                    }
+                }
             }
-        }
 
-        // 優先順位3: 会社概要セクションのリンク
-        const companySection = page.locator('.jobOfferTable, .companyData, .company-info');
-        const links = await companySection.locator('a[href^="http"]').all();
-        for (const link of links) {
-            const text = (await link.textContent())?.trim();
-            if (text && text.startsWith('http') && !text.includes('mynavi.jp')) {
-                return text;
+            // 方法3: 一般的な企業ホームページリンク
+            const homepageLink = page.locator('a:has-text("企業ホームページ"), a:has-text("コーポレートサイト")').first();
+            if (await homepageLink.count() > 0) {
+                const text = (await homepageLink.textContent())?.trim();
+                if (text && text.startsWith('http')) {
+                    return text;
+                }
             }
+
+            // 方法4: 会社概要セクションのリンク
+            const companySection = page.locator('.jobOfferTable, .companyData, .company-info, [class*="company"]');
+            const links = await companySection.locator('a[href^="http"]').all();
+            for (const link of links) {
+                const href = await link.getAttribute('href');
+                if (href && !href.includes('mynavi.jp') && !href.includes('google.com')) {
+                    // 外部リンクが企業URLの可能性
+                    return href;
+                }
+            }
+
+            // 方法5: ページ全体から企業URLを探す（最終手段）
+            const result = await page.evaluate(() => {
+                // 全てのリンクを検索
+                const allLinks = document.querySelectorAll('a[href]');
+                for (const link of allLinks) {
+                    const href = (link as HTMLAnchorElement).href;
+                    const text = link.textContent?.trim() || '';
+
+                    // mynavi以外の外部URLで、URLがテキストに含まれている場合
+                    if (href &&
+                        !href.includes('mynavi.jp') &&
+                        !href.includes('google.com') &&
+                        !href.includes('javascript:') &&
+                        text.startsWith('http')) {
+                        return text;
+                    }
+                }
+                return null;
+            });
+
+            if (result) return result;
+
+        } catch (error) {
+            // エラーは無視
         }
 
         return undefined;

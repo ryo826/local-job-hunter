@@ -627,6 +627,7 @@ export class ScrapingEngine {
                 // ランクフィルター
                 if (options.rankFilter && options.rankFilter.length > 0) {
                     if (!company.budget_rank || !options.rankFilter.includes(company.budget_rank)) {
+                        log(`ランクフィルターでスキップ: ${company.company_name} (rank: ${company.budget_rank})`);
                         skippedCount++;
                         updateProgress();
                         return;
