@@ -527,19 +527,18 @@ export class MynaviStrategy implements ScrapingStrategy {
         return undefined;
     }
 
+    // 全47都道府県のリスト
+    private readonly prefecturePattern = /(北海道|青森県|岩手県|宮城県|秋田県|山形県|福島県|茨城県|栃木県|群馬県|埼玉県|千葉県|東京都|神奈川県|新潟県|富山県|石川県|福井県|山梨県|長野県|岐阜県|静岡県|愛知県|三重県|滋賀県|京都府|大阪府|兵庫県|奈良県|和歌山県|鳥取県|島根県|岡山県|広島県|山口県|徳島県|香川県|愛媛県|高知県|福岡県|佐賀県|長崎県|熊本県|大分県|宮崎県|鹿児島県|沖縄県)/;
+
     // 住所の正規化（都道府県から始まる形式に）
     private normalizeAddress(address: string | undefined): string | undefined {
         if (!address) return undefined;
 
-        // 既に都道府県から始まっている場合はそのまま
-        if (/^[東京大阪京都神奈川埼玉千葉愛知北海道福岡]/.test(address)) {
-            return address;
-        }
-
         // 都道府県を探して、そこから始まるように切り出す
-        const match = address.match(/([東京大阪京都神奈川埼玉千葉愛知北海道福岡].*?[都道府県市区町村].+)/);
+        const match = address.match(this.prefecturePattern);
         if (match) {
-            return match[1];
+            const prefIndex = address.indexOf(match[1]);
+            return address.substring(prefIndex);
         }
 
         return address;
@@ -557,7 +556,7 @@ export class MynaviStrategy implements ScrapingStrategy {
 
     private extractAreaFromAddress(address: string | undefined): string {
         if (!address) return '';
-        const match = address.match(/([東京大阪京都神奈川埼玉千葉愛知北海道福岡].*?[都道府県市区町村])/);
+        const match = address.match(this.prefecturePattern);
         return match ? match[1] : '';
     }
 }

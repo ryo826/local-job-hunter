@@ -36,6 +36,7 @@ export interface Company {
 export interface ScrapingProgress {
     current: number;
     total: number;
+    estimated: number;
     status: string;
     source: string;
     newCount: number;
@@ -46,6 +47,8 @@ export interface ScrapingOptions {
     sources: string[];
     keywords?: string;
     location?: string;
+    prefectures?: string[];
+    jobTypes?: string[];
 }
 
 export interface EnrichProgress {

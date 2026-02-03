@@ -44,6 +44,7 @@ export interface ScrapingOptions {
 export interface ScrapingProgress {
     total: number;
     current: number;
+    estimated: number;
     newCount: number;
     duplicateCount: number;
     source: string;

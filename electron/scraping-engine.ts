@@ -12,6 +12,7 @@ import { app } from 'electron';
 export interface ScrapingProgress {
     current: number;
     total: number;
+    estimated: number;
     status: string;
     source: string;
     newCount: number;
@@ -105,6 +106,7 @@ export class ScrapingEngine {
                 let newCount = 0;
                 let duplicateCount = 0;
                 let current = 0;
+                let estimatedTotal = 100; // 初期推定値
 
                 try {
                     const log = (msg: string) => {
@@ -144,8 +146,17 @@ export class ScrapingEngine {
                             errors++;
                         }
 
+                        // 推定総数を動的に更新（現在の進捗に基づく）
+                        if (current > estimatedTotal * 0.8) {
+                            estimatedTotal = Math.ceil(current * 1.5);
+                        }
+
                         onProgress({
-                            current, total: current, newCount, duplicateCount,
+                            current,
+                            total: estimatedTotal,
+                            estimated: estimatedTotal,
+                            newCount,
+                            duplicateCount,
                             source: strategy.source,
                             status: 'スクレイピング中...'
                         });
@@ -154,7 +165,11 @@ export class ScrapingEngine {
                     console.error(`Error in strategy ${strategy.source}:`, e);
                     errors++;
                     onProgress({
-                        current, total: current, newCount, duplicateCount,
+                        current,
+                        total: estimatedTotal,
+                        estimated: estimatedTotal,
+                        newCount,
+                        duplicateCount,
                         source: strategy.source,
                         status: `エラー発生: ${e.message}`
                     });
