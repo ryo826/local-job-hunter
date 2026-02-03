@@ -535,75 +535,149 @@ export class RikunabiStrategy implements ScrapingStrategy {
         const info: Record<string, string> = {};
 
         try {
-            // 企業情報tbody: tbody[class*="styles_companyInfo"]
-            const companyTable = page.locator('tbody[class*="styles_companyInfo"]');
-            if (await companyTable.count() === 0) {
-                // 代替: 「企業情報」セクションを探す
-                const companySection = page.locator('section:has(h2:has-text("企業情報"))');
+            // 方法1: 企業情報テーブル (tbody[class*="companyInfo"])
+            const companyTable = page.locator('tbody[class*="companyInfo"], tbody[class*="styles_companyInfo"]');
+            if (await companyTable.count() > 0) {
+                const rows = await companyTable.locator('tr').all();
+                for (const row of rows) {
+                    try {
+                        const labelEl = row.locator('th h3, th[class*="title"], th');
+                        const label = (await labelEl.textContent())?.trim() || '';
+                        if (!label) continue;
+
+                        const contentEl = row.locator('td');
+                        if (await contentEl.count() === 0) continue;
+
+                        // リンクがある場合はhrefを取得 (企業HPなど)
+                        const linkEl = contentEl.locator('a[href^="http"]');
+                        if (await linkEl.count() > 0) {
+                            const href = await linkEl.getAttribute('href');
+                            if (href && !href.includes('rikunabi.com')) {
+                                info[label] = href;
+                                continue;
+                            }
+                        }
+                        info[label] = (await contentEl.textContent())?.trim() || '';
+                    } catch {
+                        // 個別行のエラーは無視
+                    }
+                }
+            }
+
+            // 方法2: 「企業情報」セクションを探す
+            if (Object.keys(info).length === 0) {
+                const companySection = page.locator('section:has(h2:has-text("企業情報")), [class*="companyInfo"], [class*="company-info"]');
                 if (await companySection.count() > 0) {
-                    const rows = await companySection.locator('tr[class*="styles_row"]').all();
+                    const rows = await companySection.locator('tr').all();
                     for (const row of rows) {
                         try {
-                            const labelEl = row.locator('th h3, th[class*="styles_title"]');
+                            const labelEl = row.locator('th');
                             const label = (await labelEl.textContent())?.trim() || '';
                             if (!label) continue;
 
                             const contentEl = row.locator('td');
-
-                            // リンクがある場合はhrefを取得
-                            const linkEl = contentEl.locator('a');
+                            const linkEl = contentEl.locator('a[href^="http"]');
                             if (await linkEl.count() > 0) {
                                 const href = await linkEl.getAttribute('href');
-                                // 外部リンクの場合はURLを保存
                                 if (href && !href.includes('rikunabi.com')) {
                                     info[label] = href;
-                                } else {
-                                    info[label] = (await contentEl.textContent())?.trim() || '';
+                                    continue;
                                 }
-                            } else {
-                                info[label] = (await contentEl.textContent())?.trim() || '';
+                            }
+                            info[label] = (await contentEl.textContent())?.trim() || '';
+                        } catch {
+                            // ignore
+                        }
+                    }
+                }
+            }
+
+            // 方法3: dt/ddパターン
+            if (Object.keys(info).length === 0) {
+                const dlElements = await page.locator('dl').all();
+                for (const dl of dlElements) {
+                    const dtElements = await dl.locator('dt').all();
+                    for (const dt of dtElements) {
+                        try {
+                            const label = (await dt.textContent())?.trim() || '';
+                            if (!label) continue;
+                            const dd = dt.locator('~ dd').first();
+                            if (await dd.count() > 0) {
+                                const linkEl = dd.locator('a[href^="http"]');
+                                if (await linkEl.count() > 0) {
+                                    const href = await linkEl.getAttribute('href');
+                                    if (href && !href.includes('rikunabi.com')) {
+                                        info[label] = href;
+                                        continue;
+                                    }
+                                }
+                                info[label] = (await dd.textContent())?.trim() || '';
                             }
                         } catch {
-                            // 個別行のエラーは無視
+                            // ignore
                         }
                     }
                 }
-                return info;
             }
 
-            // 企業情報行: tr[class*="styles_companyInfo"]
-            const rows = await companyTable.locator('tr[class*="styles_companyInfo"], tr[class*="styles_row"]').all();
+            // 企業HP URLを直接探す（フォールバック）
+            if (!info['企業HP'] && !info['ホームページ'] && !info['HP']) {
+                // 方法4: ページ内の外部リンクを探す
+                const result = await page.evaluate(() => {
+                    // 企業HPラベルの近くにあるリンクを探す
+                    const hpLabels = ['企業HP', 'ホームページ', 'HP', '企業サイト', 'コーポレートサイト', '会社HP'];
 
-            for (const row of rows) {
-                try {
-                    // ラベル: th h3
-                    const labelEl = row.locator('th h3, th[class*="styles_title"]');
-                    if (await labelEl.count() === 0) continue;
-
-                    const label = (await labelEl.textContent())?.trim() || '';
-                    if (!label) continue;
-
-                    // 内容: td
-                    const contentEl = row.locator('td');
-                    if (await contentEl.count() === 0) continue;
-
-                    // リンクがある場合はhrefを取得 (企業HPなど)
-                    const linkEl = contentEl.locator('a');
-                    if (await linkEl.count() > 0) {
-                        const href = await linkEl.getAttribute('href');
-                        // 外部リンクの場合はURLを保存
-                        if (href && !href.includes('rikunabi.com')) {
-                            info[label] = href;
-                        } else {
-                            info[label] = (await contentEl.textContent())?.trim() || '';
+                    for (const label of hpLabels) {
+                        // th要素でラベルを探す
+                        const ths = document.querySelectorAll('th');
+                        for (const th of ths) {
+                            if (th.textContent?.includes(label)) {
+                                const tr = th.closest('tr');
+                                if (tr) {
+                                    const link = tr.querySelector('a[href^="http"]') as HTMLAnchorElement;
+                                    if (link && !link.href.includes('rikunabi.com')) {
+                                        return link.href;
+                                    }
+                                }
+                            }
                         }
-                    } else {
-                        info[label] = (await contentEl.textContent())?.trim() || '';
+
+                        // dt要素でラベルを探す
+                        const dts = document.querySelectorAll('dt');
+                        for (const dt of dts) {
+                            if (dt.textContent?.includes(label)) {
+                                const dd = dt.nextElementSibling;
+                                if (dd && dd.tagName === 'DD') {
+                                    const link = dd.querySelector('a[href^="http"]') as HTMLAnchorElement;
+                                    if (link && !link.href.includes('rikunabi.com')) {
+                                        return link.href;
+                                    }
+                                }
+                            }
+                        }
                     }
-                } catch {
-                    // 個別行のエラーは無視
+
+                    // 最後の手段: 外部リンクでURLがテキストとして表示されているもの
+                    const allLinks = document.querySelectorAll('a[href^="http"]');
+                    for (const link of allLinks) {
+                        const href = (link as HTMLAnchorElement).href;
+                        const text = link.textContent?.trim() || '';
+                        if (!href.includes('rikunabi.com') &&
+                            !href.includes('google.com') &&
+                            text.startsWith('http')) {
+                            return href;
+                        }
+                    }
+
+                    return null;
+                });
+
+                if (result) {
+                    info['企業HP'] = result;
+                    log(`Found company URL via fallback: ${result}`);
                 }
             }
+
         } catch (error: any) {
             log(`Error extracting company info: ${error.message}`);
         }

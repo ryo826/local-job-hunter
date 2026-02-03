@@ -1101,56 +1101,97 @@ export class MynaviStrategy implements ScrapingStrategy {
                 await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
                 await page.waitForTimeout(randomDelay(300, 700));
 
-                // 404チェック
-                const is404 = await page.locator('text=/404|ページが見つかりません|お探しのページは|掲載が終了/i').count() > 0;
+                // 404/掲載終了チェック（複数パターン）
+                const pageContent = await page.content();
+                const is404 = pageContent.includes('404') ||
+                    pageContent.includes('ページが見つかりません') ||
+                    pageContent.includes('お探しのページは') ||
+                    pageContent.includes('掲載が終了') ||
+                    pageContent.includes('募集を終了') ||
+                    pageContent.includes('掲載期間が終了');
+
                 if (is404) {
                     logFn('Page not found or job expired, skipping');
                     return null;
                 }
 
-                // 企業情報を抽出
-                const companyUrl = await this.extractCompanyUrl(page);
-                const address = await this.extractTableValue(page, '本社所在地') ||
-                    await this.extractTableValue(page, '勤務地');
-                const industry = await this.extractTableValue(page, '事業内容') ||
-                    await this.extractTableValue(page, '業種');
-                const employees = await this.extractTableValue(page, '従業員数');
-                const establishment = await this.extractTableValue(page, '設立');
-                const representative = await this.extractTableValue(page, '代表者');
-                const salaryText = await this.extractTableValue(page, '給与') ||
-                    await this.extractTableValue(page, '年収');
-
-            // 会社名
-            let companyName = jobInfo.companyName;
-            if (!companyName) {
-                const pageCompanyEl = page.locator('.companyName, [class*="company-name"]').first();
-                if (await pageCompanyEl.count() > 0) {
-                    companyName = (await pageCompanyEl.textContent())?.trim() || '';
+                // 会社名（必須）
+                let companyName = jobInfo.companyName;
+                if (!companyName) {
+                    const pageCompanyEl = page.locator('.companyName, [class*="company-name"], h1').first();
+                    if (await pageCompanyEl.count() > 0) {
+                        companyName = (await pageCompanyEl.textContent())?.trim() || '';
+                    }
                 }
-            }
 
-            const normalizedAddress = this.normalizeAddress(address);
-            const cleanName = this.cleanCompanyName(companyName);
+                // 会社名がない場合はスキップ
+                if (!companyName) {
+                    logFn('No company name found, skipping');
+                    return null;
+                }
 
-            return {
-                source: this.source,
-                url: jobInfo.url,
-                company_name: cleanName,
-                job_title: jobInfo.jobTitle,
-                salary_text: normalizeSalary(salaryText),
-                representative,
-                establishment,
-                employees: normalizeEmployees(employees),
-                phone: undefined,
-                address: normalizedAddress,
-                area: normalizeArea(this.extractAreaFromAddress(normalizedAddress)),
-                homepage_url: companyUrl,
-                industry: normalizeIndustry(industry),
-                scrape_status: 'step1_completed',
-                budget_rank: jobInfo.rank,
-                rank_confidence: jobInfo.rank === 'A' ? 0.9 : (jobInfo.rank === 'B' ? 0.7 : 0.6),
-                job_page_updated_at: null,
-                job_page_end_date: null,
+                // 企業情報を抽出（エラーを無視して続行）
+                let companyUrl: string | undefined;
+                let address: string | undefined;
+                let industry: string | undefined;
+                let employees: string | undefined;
+                let establishment: string | undefined;
+                let representative: string | undefined;
+                let salaryText: string | undefined;
+
+                try {
+                    companyUrl = await this.extractCompanyUrl(page);
+                } catch { /* ignore */ }
+
+                try {
+                    address = await this.extractTableValue(page, '本社所在地') ||
+                        await this.extractTableValue(page, '勤務地');
+                } catch { /* ignore */ }
+
+                try {
+                    industry = await this.extractTableValue(page, '事業内容') ||
+                        await this.extractTableValue(page, '業種');
+                } catch { /* ignore */ }
+
+                try {
+                    employees = await this.extractTableValue(page, '従業員数');
+                } catch { /* ignore */ }
+
+                try {
+                    establishment = await this.extractTableValue(page, '設立');
+                } catch { /* ignore */ }
+
+                try {
+                    representative = await this.extractTableValue(page, '代表者');
+                } catch { /* ignore */ }
+
+                try {
+                    salaryText = await this.extractTableValue(page, '給与') ||
+                        await this.extractTableValue(page, '年収');
+                } catch { /* ignore */ }
+
+                const normalizedAddress = this.normalizeAddress(address);
+                const cleanName = this.cleanCompanyName(companyName);
+
+                return {
+                    source: this.source,
+                    url: jobInfo.url,
+                    company_name: cleanName,
+                    job_title: jobInfo.jobTitle,
+                    salary_text: normalizeSalary(salaryText),
+                    representative,
+                    establishment,
+                    employees: normalizeEmployees(employees),
+                    phone: undefined,
+                    address: normalizedAddress,
+                    area: normalizeArea(this.extractAreaFromAddress(normalizedAddress)),
+                    homepage_url: companyUrl,
+                    industry: normalizeIndustry(industry),
+                    scrape_status: 'step1_completed',
+                    budget_rank: jobInfo.rank,
+                    rank_confidence: jobInfo.rank === 'A' ? 0.9 : (jobInfo.rank === 'B' ? 0.7 : 0.6),
+                    job_page_updated_at: null,
+                    job_page_end_date: null,
                 };
             } catch (error: any) {
                 retries--;
