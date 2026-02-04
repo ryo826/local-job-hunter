@@ -421,8 +421,8 @@ export class RikunabiStrategy implements ScrapingStrategy {
                     const normalizedAddress = this.normalizeAddress(address);
                     const cleanName = this.cleanCompanyName(companyName);
 
-                    // 企業HPを複数のラベル名で検索
-                    const homepageUrl = companyInfo['企業HP'] || companyInfo['ホームページ'] || companyInfo['HP'] || companyInfo['企業ホームページ'] || companyInfo['WEBサイト'] || companyInfo['Webサイト'] || companyInfo['公式サイト'] || '';
+                    // 企業HPを複数のラベル名で検索（'企業ホームページ'を優先）
+                    const homepageUrl = companyInfo['企業ホームページ'] || companyInfo['企業HP'] || companyInfo['ホームページ'] || companyInfo['HP'] || companyInfo['WEBサイト'] || companyInfo['Webサイト'] || companyInfo['公式サイト'] || '';
 
                     yield {
                         source: this.source,
@@ -1045,7 +1045,7 @@ export class RikunabiStrategy implements ScrapingStrategy {
             const address = companyInfo['本社所在地'] || jobDetails['勤務地'] || '';
             const normalizedAddress = this.normalizeAddress(address);
             const cleanName = this.cleanCompanyName(companyName);
-            const homepageUrl = companyInfo['企業HP'] || companyInfo['ホームページ'] || companyInfo['HP'] || '';
+            const homepageUrl = companyInfo['企業ホームページ'] || companyInfo['企業HP'] || companyInfo['ホームページ'] || companyInfo['HP'] || '';
 
                 return {
                     source: this.source,
