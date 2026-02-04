@@ -264,7 +264,7 @@ export class RikunabiStrategy implements ScrapingStrategy {
                         phone: companyInfo['企業代表番号'] || '',
                         address: normalizedAddress,
                         area: this.extractAreaFromAddress(normalizedAddress),
-                        homepage_url: companyInfo['企業HP'] || '',
+                        homepage_url: companyInfo['企業ホームページ'] || companyInfo['企業HP'] || '',
                         industry: companyInfo['事業内容'] || '',
                         scrape_status: 'step1_completed',
                     };
