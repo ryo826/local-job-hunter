@@ -667,44 +667,76 @@ export class MynaviStrategy implements ScrapingStrategy {
     // 企業URLを抽出（複数箇所をチェック）
     private async extractCompanyUrl(page: Page): Promise<string | undefined> {
         try {
-            // 方法1: 企業ホームページのテーブル行から取得
-            // HTMLの実際の構造: <th>企業ホームページ</th><td><a>https://example.com/</a></td>
-            const homepageRow = page.locator('th.jobOfferTable__head:has-text("企業ホームページ")').first();
-            if (await homepageRow.count() > 0) {
-                const tdEl = homepageRow.locator('~ td').first();
-                if (await tdEl.count() > 0) {
-                    const linkEl = tdEl.locator('a').first();
-                    if (await linkEl.count() > 0) {
-                        // リンクのテキスト内容が実際のURL
-                        const urlText = (await linkEl.textContent())?.trim();
-                        if (urlText && urlText.startsWith('http')) {
-                            return urlText;
+            // 方法1: 企業ホームページのテーブル行から取得（tr経由でtdを取得）
+            // HTMLの実際の構造: <tr><th>企業ホームページ</th><td><a>https://example.com/</a></td></tr>
+            const homepageTh = page.locator('th.jobOfferTable__head:has-text("企業ホームページ")').first();
+            if (await homepageTh.count() > 0) {
+                // 親のtrを取得し、その中のtdを探す
+                const parentTr = homepageTh.locator('xpath=..');
+                if (await parentTr.count() > 0) {
+                    const tdEl = parentTr.locator('td.jobOfferTable__body').first();
+                    if (await tdEl.count() > 0) {
+                        const linkEl = tdEl.locator('a').first();
+                        if (await linkEl.count() > 0) {
+                            // リンクのテキスト内容が実際のURL
+                            const urlText = (await linkEl.textContent())?.trim();
+                            if (urlText && urlText.startsWith('http')) {
+                                return urlText;
+                            }
+                            // hrefからも試す（リダイレクトURLの場合があるため最終手段）
+                            const href = await linkEl.getAttribute('href');
+                            if (href && !href.includes('mynavi.jp') && href.startsWith('http')) {
+                                return href;
+                            }
                         }
-                        // hrefからも試す（リダイレクトURLの場合があるため最終手段）
-                        const href = await linkEl.getAttribute('href');
-                        if (href && !href.includes('mynavi.jp') && href.startsWith('http')) {
-                            return href;
+                        // リンクがない場合、テキストがURLかもしれない
+                        const text = (await tdEl.textContent())?.trim();
+                        if (text && text.startsWith('http') && !text.includes('mynavi.jp')) {
+                            return text;
                         }
                     }
                 }
             }
 
-            // 方法2: 会社概要テーブルの「企業HP」「HP」行
+            // 方法2: 会社概要テーブルの「企業HP」「HP」行（tr経由でtdを取得）
             const hpLabels = ['企業HP', 'HP', 'ホームページ', 'URL', '公式サイト', 'WEBサイト'];
             for (const label of hpLabels) {
-                const labelEl = page.locator(`th:has-text("${label}"), dt:has-text("${label}")`).first();
-                if (await labelEl.count() > 0) {
-                    const valueEl = labelEl.locator('~ td, ~ dd').first();
-                    if (await valueEl.count() > 0) {
-                        const linkEl = valueEl.locator('a').first();
+                // thパターン
+                const thEl = page.locator(`th:has-text("${label}")`).first();
+                if (await thEl.count() > 0) {
+                    const parentTr = thEl.locator('xpath=..');
+                    if (await parentTr.count() > 0) {
+                        const tdEl = parentTr.locator('td').first();
+                        if (await tdEl.count() > 0) {
+                            const linkEl = tdEl.locator('a').first();
+                            if (await linkEl.count() > 0) {
+                                const urlText = (await linkEl.textContent())?.trim();
+                                if (urlText && urlText.startsWith('http') && !urlText.includes('mynavi.jp')) {
+                                    return urlText;
+                                }
+                            }
+                            // リンクがない場合、テキストがURLかもしれない
+                            const text = (await tdEl.textContent())?.trim();
+                            if (text && text.startsWith('http') && !text.includes('mynavi.jp')) {
+                                return text;
+                            }
+                        }
+                    }
+                }
+                // dt/ddパターン
+                const dtEl = page.locator(`dt:has-text("${label}")`).first();
+                if (await dtEl.count() > 0) {
+                    const parentDl = dtEl.locator('xpath=..');
+                    const ddEl = parentDl.locator(`dt:has-text("${label}") + dd`).first();
+                    if (await ddEl.count() > 0) {
+                        const linkEl = ddEl.locator('a').first();
                         if (await linkEl.count() > 0) {
                             const urlText = (await linkEl.textContent())?.trim();
                             if (urlText && urlText.startsWith('http') && !urlText.includes('mynavi.jp')) {
                                 return urlText;
                             }
                         }
-                        // リンクがない場合、テキストがURLかもしれない
-                        const text = (await valueEl.textContent())?.trim();
+                        const text = (await ddEl.textContent())?.trim();
                         if (text && text.startsWith('http') && !text.includes('mynavi.jp')) {
                             return text;
                         }
@@ -761,36 +793,43 @@ export class MynaviStrategy implements ScrapingStrategy {
         return undefined;
     }
 
-    // テーブル形式のデータを抽出
+    // テーブル形式のデータを抽出（tr経由でtdを取得）
     private async extractTableValue(page: Page, label: string): Promise<string | undefined> {
         // マイナビの実際の構造: th.jobOfferTable__head / td.jobOfferTable__body > div.text
         const jobOfferTh = page.locator(`th.jobOfferTable__head:has-text("${label}")`).first();
         if (await jobOfferTh.count() > 0) {
-            const tdEl = jobOfferTh.locator('~ td.jobOfferTable__body').first();
-            if (await tdEl.count() > 0) {
-                // div.text 内のテキストを取得
-                const textEl = tdEl.locator('.text').first();
-                if (await textEl.count() > 0) {
-                    return (await textEl.textContent())?.trim() || undefined;
+            // 親のtrを取得し、その中のtdを探す
+            const parentTr = jobOfferTh.locator('xpath=..');
+            if (await parentTr.count() > 0) {
+                const tdEl = parentTr.locator('td.jobOfferTable__body').first();
+                if (await tdEl.count() > 0) {
+                    // div.text 内のテキストを取得
+                    const textEl = tdEl.locator('.text').first();
+                    if (await textEl.count() > 0) {
+                        return (await textEl.textContent())?.trim() || undefined;
+                    }
+                    // div.text がない場合は td 直下のテキスト
+                    return (await tdEl.textContent())?.trim() || undefined;
                 }
-                // div.text がない場合は td 直下のテキスト
-                return (await tdEl.textContent())?.trim() || undefined;
             }
         }
 
-        // 一般的な th/td パターン
+        // 一般的な th/td パターン（tr経由）
         const thEl = page.locator(`th:has-text("${label}")`).first();
         if (await thEl.count() > 0) {
-            const tdEl = thEl.locator('~ td').first();
-            if (await tdEl.count() > 0) {
-                return (await tdEl.textContent())?.trim() || undefined;
+            const parentTr = thEl.locator('xpath=..');
+            if (await parentTr.count() > 0) {
+                const tdEl = parentTr.locator('td').first();
+                if (await tdEl.count() > 0) {
+                    return (await tdEl.textContent())?.trim() || undefined;
+                }
             }
         }
 
-        // dt/dd パターン
+        // dt/dd パターン（隣接セレクター使用）
         const dtEl = page.locator(`dt:has-text("${label}")`).first();
         if (await dtEl.count() > 0) {
-            const ddEl = dtEl.locator('~ dd').first();
+            const ddEl = page.locator(`dt:has-text("${label}") + dd`).first();
             if (await ddEl.count() > 0) {
                 return (await ddEl.textContent())?.trim() || undefined;
             }
