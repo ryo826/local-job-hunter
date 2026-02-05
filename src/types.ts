@@ -76,10 +76,14 @@ export interface ScrapingOptions {
     prefectures?: string[];  // 複数の都道府県
     jobTypes?: string[];     // 複数の職種カテゴリ（検索条件）
     rankFilter?: BudgetRank[];  // 保存対象のランク（空配列または未指定で全て保存）
-    minSalary?: number;      // 年収下限（万円）
-    employeeRange?: string;  // 企業規模範囲（例: "50-100", "1000-"）
+    // 検索URL用フィルター（スクレイピング前）
+    minSalary?: number;          // 年収下限（万円）- mynavi, rikunabi
+    minEmployees?: number;       // 従業員数下限 - mynavi
+    newPostsOnly?: boolean;      // 新着求人のみ - mynavi
+    // 事後フィルター（スクレイピング後）
+    employeeRange?: string;      // 従業員数範囲指定（例: "50-100", "1000-"）
     maxJobUpdatedDays?: number;  // 求人更新日から何日以内
-    jobTypeFilter?: string[];    // 職種カテゴリフィルター（事後フィルター）
+    jobTypeFilter?: string[];    // 職種カテゴリフィルター
 }
 
 export interface ScrapingProgress {

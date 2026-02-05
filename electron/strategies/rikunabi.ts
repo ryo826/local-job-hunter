@@ -760,9 +760,9 @@ export class RikunabiStrategy implements ScrapingStrategy {
     }
 
     // 検索URLを構築するヘルパーメソッド
-    // URL形式: https://next.rikunabi.com/job_search/area-{英語名}/oc-{職種英語名}/
+    // URL形式: https://next.rikunabi.com/job_search/area-{英語名}/oc-{職種英語名}/sal-over{年収}/
     private buildSearchUrl(params: ScrapingParams): string {
-        const { keywords, prefectures, jobTypes } = params;
+        const { keywords, prefectures, jobTypes, minSalary } = params;
 
         // パスベースのURL構築
         let pathParts: string[] = [];
@@ -781,6 +781,11 @@ export class RikunabiStrategy implements ScrapingStrategy {
             if (jobCode) {
                 pathParts.push(`oc-${jobCode}`);
             }
+        }
+
+        // 年収フィルター（例: sal-over500 = 500万円以上）
+        if (minSalary && minSalary > 0) {
+            pathParts.push(`sal-over${minSalary}`);
         }
 
         // URL構築

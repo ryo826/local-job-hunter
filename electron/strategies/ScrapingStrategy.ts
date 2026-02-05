@@ -50,6 +50,10 @@ export interface ScrapingParams {
     location?: string;
     prefectures?: string[];  // 複数の都道府県
     jobTypes?: string[];     // 複数の職種カテゴリ
+    // 検索URL用フィルター
+    minSalary?: number;      // 年収下限（万円）- mynavi, rikunabi対応
+    minEmployees?: number;   // 従業員数下限 - mynavi対応
+    newPostsOnly?: boolean;  // 新着求人のみ - mynavi対応
 }
 
 export interface ScrapingCallbacks {

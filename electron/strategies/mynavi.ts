@@ -884,9 +884,9 @@ export class MynaviStrategy implements ScrapingStrategy {
     }
 
     // 検索URLを構築するヘルパーメソッド
-    // URL形式: https://tenshoku.mynavi.jp/{エリア}/list/p{都道府県コード}/o{職種コード}/
+    // URL形式: https://tenshoku.mynavi.jp/{エリア}/list/p{都道府県コード}/o{職種コード}/min{年収}/emin{従業員数}/new/
     private buildSearchUrl(params: ScrapingParams): string {
-        const { keywords, prefectures, jobTypes } = params;
+        const { keywords, prefectures, jobTypes, minSalary, minEmployees, newPostsOnly } = params;
 
         // ベースURL構築
         let basePath = '';
@@ -926,6 +926,23 @@ export class MynaviStrategy implements ScrapingStrategy {
             if (jobCode) {
                 searchUrl += `${jobCode}/`;
             }
+        }
+
+        // 年収フィルター（例: min0500 = 500万円以上）
+        if (minSalary && minSalary > 0) {
+            const salaryCode = String(minSalary).padStart(4, '0');
+            searchUrl += `min${salaryCode}/`;
+        }
+
+        // 従業員数フィルター（例: emin0100 = 100名以上）
+        if (minEmployees && minEmployees > 0) {
+            const empCode = String(minEmployees).padStart(4, '0');
+            searchUrl += `emin${empCode}/`;
+        }
+
+        // 新着求人フィルター
+        if (newPostsOnly) {
+            searchUrl += 'new/';
         }
 
         // キーワード検索はクエリパラメータで追加

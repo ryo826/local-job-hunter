@@ -82,10 +82,14 @@ interface ScrapingOptions {
     prefectures?: string[];
     jobTypes?: string[];
     rankFilter?: BudgetRank[];
-    minSalary?: number;
-    employeeRange?: string;  // 範囲指定（例: "50-100", "1000-"）
-    maxJobUpdatedDays?: number;
-    jobTypeFilter?: string[];  // 職種カテゴリフィルター（事後フィルター）
+    // 検索URL用フィルター（スクレイピング前）
+    minSalary?: number;          // 年収下限（万円）- mynavi, rikunabi
+    minEmployees?: number;       // 従業員数下限 - mynavi
+    newPostsOnly?: boolean;      // 新着求人のみ - mynavi
+    // 事後フィルター（スクレイピング後）
+    employeeRange?: string;      // 従業員数範囲指定（例: "50-100", "1000-"）
+    maxJobUpdatedDays?: number;  // 求人更新日から何日以内
+    jobTypeFilter?: string[];    // 職種カテゴリフィルター
 }
 
 interface SourceProgress {
@@ -146,6 +150,10 @@ export class ScrapingEngine {
                 location: options.location,
                 prefectures: options.prefectures,
                 jobTypes: options.jobTypes,
+                // 検索URL用フィルター
+                minSalary: options.minSalary,
+                minEmployees: options.minEmployees,
+                newPostsOnly: options.newPostsOnly,
             };
 
             const scrapeStartTime = Date.now();
