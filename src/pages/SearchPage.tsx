@@ -46,20 +46,23 @@ const regionPrefectures: Record<string, string[]> = {
 
 const regions = Object.keys(regionPrefectures);
 
-// 職種カテゴリ
+// 職種カテゴリ（15統合カテゴリ）
 const jobTypeCategories = [
-    { id: 'sales', name: '営業・販売', icon: '💼' },
-    { id: 'management', name: '経営・事業企画・人事・事務', icon: '📊' },
-    { id: 'it', name: 'IT・Web・ゲームエンジニア', icon: '💻' },
-    { id: 'manufacturing', name: 'モノづくりエンジニア', icon: '🔧' },
-    { id: 'consulting', name: 'コンサルタント・士業・金融', icon: '📈' },
-    { id: 'service', name: 'サービス・販売・接客', icon: '🛎️' },
-    { id: 'realestate', name: '不動産・建設', icon: '🏗️' },
-    { id: 'logistics', name: '物流・運輸・運転', icon: '🚚' },
-    { id: 'medical', name: '医療・福祉・介護', icon: '🏥' },
-    { id: 'creative', name: 'クリエイティブ・マスコミ', icon: '🎨' },
-    { id: 'education', name: '教育・保育', icon: '📚' },
-    { id: 'other', name: 'その他', icon: '📋' },
+    { id: 'sales', name: '営業・販売・カスタマー対応', icon: '💼' },
+    { id: 'planning', name: '企画・マーケティング・経営', icon: '📊' },
+    { id: 'office', name: '事務・管理・アシスタント', icon: '📝' },
+    { id: 'it', name: 'ITエンジニア・Web・ゲーム', icon: '💻' },
+    { id: 'electric', name: '電気・電子・機械・半導体・制御', icon: '⚡' },
+    { id: 'chemical', name: '化学・素材・食品・医薬', icon: '🧪' },
+    { id: 'construction', name: '建築・土木・設備・プラント・不動産技術', icon: '🏗️' },
+    { id: 'creative', name: 'クリエイティブ・デザイン', icon: '🎨' },
+    { id: 'consulting', name: 'コンサルタント・専門職', icon: '📈' },
+    { id: 'finance', name: '金融専門職', icon: '💰' },
+    { id: 'medical', name: '医療・介護・福祉', icon: '🏥' },
+    { id: 'education', name: '教育・保育・公共サービス', icon: '📚' },
+    { id: 'service', name: 'サービス・外食・レジャー・美容・ホテル・交通', icon: '🛎️' },
+    { id: 'logistics', name: '物流・運輸・技能工・設備・製造', icon: '🚚' },
+    { id: 'public', name: '公務員・団体職員・その他', icon: '🏛️' },
 ];
 
 // 給与フィルターオプション

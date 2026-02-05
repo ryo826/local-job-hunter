@@ -158,18 +158,22 @@ const jobTypeCodes: Record<string, string> = {
     'エグゼクティブ': 'executive',
     '学術研究': 'analysis',
     '公務員/団体職員/農林水産': 'publicsector',
-    // SearchPage統一カテゴリからのエイリアス
-    '営業・販売': 'selling',
-    '経営・事業企画・人事・事務': 'corporatestaff',
-    'モノづくりエンジニア': 'electronic',
-    'コンサルタント・士業・金融': 'consulting',
-    'サービス・販売・接客': 'hospitality',
-    '不動産・建設': 'building',
-    '物流・運輸・運転': 'transportation',
-    '医療・福祉・介護': 'medical',
-    'クリエイティブ・マスコミ': 'design',
-    '教育・保育': 'instruction',
-    'その他': 'publicsector',
+    // 15統合カテゴリからのエイリアス
+    '営業・販売・カスタマー対応': 'selling',           // ① 営業・販売・カスタマーサポート
+    '企画・マーケティング・経営': 'promotion',         // ② 企画・マーケティング・経営
+    '事務・管理・アシスタント': 'administration',      // ③ 事務・管理
+    'ITエンジニア・Web・ゲーム': 'it',                 // ④ ITエンジニア（システム開発・インフラ）
+    '電気・電子・機械・半導体・制御': 'electronic',    // ⑤ 機械・電気・電子・半導体・制御
+    '化学・素材・食品・医薬': 'chemicals',             // ⑥ 化学・素材・食品・医薬
+    '建築・土木・設備・プラント・不動産技術': 'building', // ⑦ 建築・土木・設備・プラント
+    'クリエイティブ・デザイン': 'design',              // ⑧ クリエイティブ
+    'コンサルタント・専門職': 'consulting',            // ⑨ コンサルタント・専門職
+    '金融専門職': 'financial',                         // ⑩ 金融専門職
+    '医療・介護・福祉': 'medical',                     // ⑪ 医療・医薬・介護・福祉
+    '教育・保育・公共サービス': 'instruction',         // ⑫ 教育・保育・通訳
+    'サービス・外食・レジャー・美容・ホテル・交通': 'hospitality', // ⑬ サービス・外食・レジャー
+    '物流・運輸・技能工・設備・製造': 'transportation', // ⑭ 物流・運輸・設備／製造・技能工
+    '公務員・団体職員・その他': 'publicsector',        // ⑮ 公務員・団体職員・その他
 };
 
 export class RikunabiStrategy implements ScrapingStrategy {
