@@ -60,6 +60,8 @@ export interface Company {
     job_page_updated_at: string | null;  // 求人ページの最終更新日
     job_page_end_date: string | null;    // 掲載終了予定日
     job_page_start_date: string | null;  // 掲載開始日(doda)
+    // 職種カテゴリ
+    job_type: string | null;             // 15統合カテゴリの職種
 }
 
 export type CompanyFilters = {
@@ -72,11 +74,12 @@ export interface ScrapingOptions {
     keywords?: string;
     location?: string;
     prefectures?: string[];  // 複数の都道府県
-    jobTypes?: string[];     // 複数の職種カテゴリ
+    jobTypes?: string[];     // 複数の職種カテゴリ（検索条件）
     rankFilter?: BudgetRank[];  // 保存対象のランク（空配列または未指定で全て保存）
     minSalary?: number;      // 年収下限（万円）
     employeeRange?: string;  // 企業規模範囲（例: "50-100", "1000-"）
     maxJobUpdatedDays?: number;  // 求人更新日から何日以内
+    jobTypeFilter?: string[];    // 職種カテゴリフィルター（事後フィルター）
 }
 
 export interface ScrapingProgress {

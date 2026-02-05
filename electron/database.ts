@@ -157,6 +157,9 @@ export function initDB() {
 
     // 求人ページ更新日関連カラムのマイグレーション
     migrateJobPageDateColumns(database);
+
+    // 職種カラムのマイグレーション
+    migrateJobTypeColumn(database);
 }
 
 // ランク関連カラムを既存テーブルに追加するマイグレーション
@@ -264,6 +267,21 @@ function migrateJobPageDateColumns(database: Database.Database) {
 
     // インデックス作成
     database.exec(`CREATE INDEX IF NOT EXISTS idx_companies_job_page_updated ON companies(job_page_updated_at DESC)`);
+}
+
+// 職種カラムを追加するマイグレーション
+function migrateJobTypeColumn(database: Database.Database) {
+    const tableInfo = database.prepare('PRAGMA table_info(companies)').all() as Array<{ name: string }>;
+    const existingColumns = new Set(tableInfo.map(col => col.name));
+
+    // job_type: 求人の職種カテゴリ（15統合カテゴリ）
+    if (!existingColumns.has('job_type')) {
+        console.log('[Database] Adding job_type column to companies table');
+        database.exec(`ALTER TABLE companies ADD COLUMN job_type TEXT`);
+    }
+
+    // インデックス作成
+    database.exec(`CREATE INDEX IF NOT EXISTS idx_companies_job_type ON companies(job_type)`);
 }
 
 // Repository Functions
@@ -406,6 +424,11 @@ export const companyRepository = {
             }
             if (company.job_page_start_date) {
                 updateFields.job_page_start_date = company.job_page_start_date;
+            }
+
+            // 職種カテゴリの更新
+            if (company.job_type) {
+                updateFields.job_type = company.job_type;
             }
 
             // Always update timestamps

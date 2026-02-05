@@ -41,6 +41,8 @@ export interface CompanyData {
     job_page_updated_at?: string | null;  // 求人ページの最終更新日
     job_page_end_date?: string | null;    // 掲載終了予定日
     job_page_start_date?: string | null;  // 掲載開始日(doda)
+    // 職種カテゴリ
+    job_type?: string;                    // 15統合カテゴリの職種
 }
 
 export interface ScrapingParams {

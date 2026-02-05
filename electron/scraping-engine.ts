@@ -85,6 +85,7 @@ interface ScrapingOptions {
     minSalary?: number;
     employeeRange?: string;  // 範囲指定（例: "50-100", "1000-"）
     maxJobUpdatedDays?: number;
+    jobTypeFilter?: string[];  // 職種カテゴリフィルター（事後フィルター）
 }
 
 interface SourceProgress {
@@ -426,6 +427,16 @@ export class ScrapingEngine {
                     }
                 }
 
+                // 職種フィルター
+                if (options.jobTypeFilter && options.jobTypeFilter.length > 0) {
+                    if (!company.job_type || !options.jobTypeFilter.includes(company.job_type)) {
+                        log(`職種フィルターでスキップ: ${company.company_name}`);
+                        skippedCount++;
+                        updateProgress();
+                        return;
+                    }
+                }
+
                 // 重複チェック
                 const existsByName = companyRepository.existsByName(company.company_name);
                 if (existsByName) {
@@ -495,6 +506,10 @@ export class ScrapingEngine {
             for await (const company of strategy.scrape(page, params, { onLog: log, onTotalCount })) {
                 if (this.shouldStop) break;
                 jobsFound++;
+                // 検索条件の職種を設定
+                if (params.jobTypes && params.jobTypes.length > 0) {
+                    company.job_type = params.jobTypes[0];
+                }
                 jobQueue.push(company);
 
                 // キューが大きくなりすぎないよう待機
@@ -673,6 +688,15 @@ export class ScrapingEngine {
                     }
                 }
 
+                // 職種フィルター
+                if (options.jobTypeFilter && options.jobTypeFilter.length > 0) {
+                    if (!company.job_type || !options.jobTypeFilter.includes(company.job_type)) {
+                        skippedCount++;
+                        updateProgress();
+                        return;
+                    }
+                }
+
                 // 重複チェック
                 const existsByName = companyRepository.existsByName(company.company_name);
                 if (existsByName) {
@@ -750,6 +774,10 @@ export class ScrapingEngine {
                         );
 
                         if (company) {
+                            // 検索条件の職種を設定
+                            if (params.jobTypes && params.jobTypes.length > 0) {
+                                company.job_type = params.jobTypes[0];
+                            }
                             await processCompany(company);
                         } else {
                             skippedCount++;
