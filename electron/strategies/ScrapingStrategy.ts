@@ -40,7 +40,6 @@ export interface CompanyData {
     // 求人ページ更新日関連フィールド
     job_page_updated_at?: string | null;  // 求人ページの最終更新日
     job_page_end_date?: string | null;    // 掲載終了予定日
-    job_page_start_date?: string | null;  // 掲載開始日(doda)
     // 職種カテゴリ
     job_type?: string;                    // 15統合カテゴリの職種
 }
@@ -54,6 +53,9 @@ export interface ScrapingParams {
     minSalary?: number;      // 年収下限（万円）- mynavi, rikunabi対応
     minEmployees?: number;   // 従業員数下限 - mynavi対応
     newPostsOnly?: boolean;  // 新着求人のみ - mynavi対応
+    employeeRange?: string;  // 従業員数範囲（例: "50-100"）- doda対応
+    // ランクフィルター（URL収集の最適化用）
+    rankFilter?: BudgetRank[];  // 収集対象のランク
 }
 
 export interface ScrapingCallbacks {

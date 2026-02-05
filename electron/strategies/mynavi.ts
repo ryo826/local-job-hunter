@@ -1,12 +1,15 @@
-
 import { Page, Locator } from 'playwright';
 import { ScrapingStrategy, CompanyData, ScrapingParams, ScrapingCallbacks, BudgetRank, JobCardInfo } from './ScrapingStrategy';
 import { normalizeIndustry, normalizeArea, normalizeSalary, normalizeEmployees } from '../utils/data-normalizer';
-
-// ランダム待機時間のヘルパー関数
-function randomDelay(min: number, max: number): number {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-}
+import {
+    randomDelay,
+    loadPageWithRetry,
+    waitForAnySelector,
+    extractTotalCount,
+    normalizeAddress as normalizeAddressUtil,
+    cleanCompanyName as cleanCompanyNameUtil,
+    extractPrefectureFromAddress,
+} from '../utils/scraping-utils';
 
 // ランク判定結果
 interface RankResult {
@@ -87,22 +90,34 @@ async function extractMynaviJobDates(card: Locator): Promise<JobPageDates> {
 }
 
 // マイナビ転職のランク判定ロジック
-// 優先度: data-ty="rzs" > 注目枠ラベル > ページ番号
+// 実際のHTML調査結果に基づく判定:
+// - 「注目」ラベル (.attention.box): 最上位プラン → A級 (0.17%のみ)
+// - 「新着」ラベル (.new.box): 標準プラン → B級 (4%)
+// - ラベルなし: 通常プラン → C級 (95.8%)
 async function classifyMynavi(card: Locator, pageNum: number): Promise<RankResult> {
     try {
-        // 1. data-ty属性をチェック
+        // 1. 「注目」ラベルをチェック（最上位有料プラン）
+        const hasAttentionBox = await card.locator('.attention.box').count() > 0;
+        if (hasAttentionBox) {
+            return { rank: 'A', confidence: 0.95 };  // 最上位プラン（確実）
+        }
+
+        // 2. 旧セレクターもフォールバックとしてチェック
         const dataTy = await card.getAttribute('data-ty');
-
-        // 2. 注目枠ラベルの存在確認
         const hasAttentionLabel = await card.locator('.cassetteRecruitRecommend__label--attention').count() > 0;
-
         if (dataTy === 'rzs' || hasAttentionLabel) {
             return { rank: 'A', confidence: 0.9 };  // プレミアム枠
-        } else if (pageNum === 1) {
-            return { rank: 'B', confidence: 0.7 };  // 1ページ目の通常枠
-        } else {
-            return { rank: 'C', confidence: 0.6 };  // 2ページ目以降
         }
+
+        // 3. 「新着」ラベルをチェック（標準プラン）
+        const hasNewBox = await card.locator('.new.box').count() > 0;
+        if (hasNewBox) {
+            return { rank: 'B', confidence: 0.8 };  // 新着（標準プラン）
+        }
+
+        // 4. ラベルなし（通常プラン）
+        return { rank: 'C', confidence: 0.7 };  // 通常プラン
+
     } catch (error) {
         console.warn(`Rank classification failed: ${error}`);
         return { rank: 'C', confidence: 0.3 }; // デフォルトで最下位ランク
@@ -278,7 +293,7 @@ export class MynaviStrategy implements ScrapingStrategy {
 
         // 求人カードの出現を待機（複数のセレクターを試行）
         log('Waiting for job cards to appear...');
-        const cardSelector = await this.waitForAnySelector(page, JOB_CARD_SELECTORS, 15000, log);
+        const cardSelector = await waitForAnySelector(page, JOB_CARD_SELECTORS, 15000, log);
         if (!cardSelector) {
             log('ERROR: No job cards found with any known selector');
             log('Available selectors tried: ' + JOB_CARD_SELECTORS.join(', '));
@@ -508,9 +523,9 @@ export class MynaviStrategy implements ScrapingStrategy {
                     }
 
                     // 住所の正規化
-                    const normalizedAddress = this.normalizeAddress(address);
+                    const normalizedAddress = normalizeAddressUtil(address);
 
-                    const cleanName = this.cleanCompanyName(companyName);
+                    const cleanName = cleanCompanyNameUtil(companyName);
 
                     // Note: 電話番号はGoogle Maps APIで後から取得するため、Step 2はスキップ
                     // スクレイピング速度が大幅に向上
@@ -527,7 +542,7 @@ export class MynaviStrategy implements ScrapingStrategy {
                         revenue,
                         phone: phone, // 求人ページのテーブルから取得できた場合のみ
                         address: normalizedAddress,
-                        area: normalizeArea(this.extractAreaFromAddress(normalizedAddress)),
+                        area: normalizeArea(extractPrefectureFromAddress(normalizedAddress)),
                         homepage_url: companyUrl,
                         industry: normalizeIndustry(industry),
                         job_description: jobDescription,
@@ -615,28 +630,6 @@ export class MynaviStrategy implements ScrapingStrategy {
         }
 
         log(`Completed scraping ${pageNum} pages`);
-    }
-
-    // 複数のセレクターから最初に見つかったものを返す
-    private async waitForAnySelector(page: Page, selectors: string[], timeout: number, log: (msg: string) => void): Promise<string | null> {
-        const startTime = Date.now();
-
-        while (Date.now() - startTime < timeout) {
-            for (const selector of selectors) {
-                try {
-                    const count = await page.locator(selector).count();
-                    if (count > 0) {
-                        log(`Found ${count} elements with selector: ${selector}`);
-                        return selector;
-                    }
-                } catch {
-                    // セレクターがエラーになる場合はスキップ
-                }
-            }
-            await page.waitForTimeout(500);
-        }
-
-        return null;
     }
 
     // デバッグ用：ページの主要要素情報を取得
@@ -841,50 +834,9 @@ export class MynaviStrategy implements ScrapingStrategy {
         return undefined;
     }
 
-    // 住所の正規化（都道府県から始まる形式に）
-    private normalizeAddress(address: string | undefined): string | undefined {
-        if (!address) return undefined;
-
-        // 既に都道府県から始まっている場合はそのまま
-        if (/^[東京大阪京都神奈川埼玉千葉愛知北海道福岡]/.test(address)) {
-            return address;
-        }
-
-        // 都道府県を探して、そこから始まるように切り出す
-        const match = address.match(/([東京大阪京都神奈川埼玉千葉愛知北海道福岡].*?[都道府県市区町村].+)/);
-        if (match) {
-            return match[1];
-        }
-
-        return address;
-    }
-
-    private cleanCompanyName(name: string): string {
-        return name
-            // パイプ以降を削除（求人タイトルが含まれている場合）
-            .split(/[|｜]/)[0]
-            // 【】内のプロモーション文のみ削除（株式会社等の法人格は保持）
-            .replace(/【プライム市場】|【スタンダード市場】|【グロース市場】|【東証一部】|【東証二部】|【TOKYO PRO Market上場】|【急募】|【未経験歓迎】/g, '')
-            // グループ会社の補足表記を削除
-            .replace(/\(.*グループ.*\)/g, '')
-            .replace(/（.*グループ.*）/g, '')
-            // 全角英数字を半角に変換
-            .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
-            // 全角スペースを半角に
-            .replace(/　/g, ' ')
-            // 余分な空白を整理
-            .replace(/\s+/g, ' ')
-            .trim();
-    }
-
-    private extractAreaFromAddress(address: string | undefined): string {
-        if (!address) return '';
-        const match = address.match(/([東京大阪京都神奈川埼玉千葉愛知北海道福岡].*?[都道府県市区町村])/);
-        return match ? match[1] : '';
-    }
-
     // 検索URLを構築するヘルパーメソッド
-    // URL形式: https://tenshoku.mynavi.jp/{エリア}/list/p{都道府県コード}/o{職種コード}/min{年収}/emin{従業員数}/new/
+    // URL形式: https://tenshoku.mynavi.jp/{エリア}/list/p{都道府県コード}/o{職種コード}/only/min{年収}/emin{従業員数}/new/?ags=0
+    // /only/ を付けないと指定した地域以外の求人も含まれてしまう
     private buildSearchUrl(params: ScrapingParams): string {
         const { keywords, prefectures, jobTypes, minSalary, minEmployees, newPostsOnly } = params;
 
@@ -920,6 +872,8 @@ export class MynaviStrategy implements ScrapingStrategy {
             if (jobCode) {
                 searchUrl += `${jobCode}/`;
             }
+            // /only/ を職種コードの後に追加して指定地域のみに限定
+            searchUrl += 'only/';
         } else {
             // 条件なしの場合はベースリストURL
             searchUrl += 'list/';
@@ -945,9 +899,19 @@ export class MynaviStrategy implements ScrapingStrategy {
             searchUrl += 'new/';
         }
 
-        // キーワード検索はクエリパラメータで追加
+        // クエリパラメータ構築
+        const queryParams: string[] = [];
+
+        // キーワード検索
         if (keywords) {
-            searchUrl += `?searchKeyword=${encodeURIComponent(keywords)}`;
+            queryParams.push(`searchKeyword=${encodeURIComponent(keywords)}`);
+        }
+
+        // ags=0 パラメータ（常に追加）
+        queryParams.push('ags=0');
+
+        if (queryParams.length > 0) {
+            searchUrl += `?${queryParams.join('&')}`;
         }
 
         return searchUrl;
@@ -961,14 +925,22 @@ export class MynaviStrategy implements ScrapingStrategy {
             await page.waitForTimeout(2000);
 
             // マイナビの検索結果件数を取得
-            // セレクタ: .js__searchRecruit--count (カンマなし数字: 51740)
-            const element = page.locator('.js__searchRecruit--count').first();
-            if (await element.count() > 0) {
-                const text = await element.textContent();
-                if (text) {
-                    const num = parseInt(text.replace(/,/g, ''), 10);
-                    if (!isNaN(num)) {
-                        return num;
+            // セレクタ: span.total_txt.total_num (カンマ区切り数字: 2,738)
+            const selectors = [
+                'span.total_txt.total_num',
+                '.total_txt.total_num',
+                '.js__searchRecruit--count',
+            ];
+
+            for (const selector of selectors) {
+                const element = page.locator(selector).first();
+                if (await element.count() > 0) {
+                    const text = await element.textContent();
+                    if (text) {
+                        const num = parseInt(text.replace(/,/g, ''), 10);
+                        if (!isNaN(num)) {
+                            return num;
+                        }
                     }
                 }
             }
@@ -1007,7 +979,7 @@ export class MynaviStrategy implements ScrapingStrategy {
                 await page.waitForTimeout(randomDelay(1000, 2000));
 
                 // カードセレクターを取得
-                cardSelector = await this.waitForAnySelector(page, JOB_CARD_SELECTORS, 10000, log);
+                cardSelector = await waitForAnySelector(page, JOB_CARD_SELECTORS, 10000, log);
                 if (!cardSelector) {
                     log('No job cards found');
                     return allJobs;
@@ -1029,22 +1001,48 @@ export class MynaviStrategy implements ScrapingStrategy {
         try {
 
             // 総件数を取得
+            // セレクタ: span.total_txt.total_num (カンマ区切り数字: 2,738)
             if (onTotalCount) {
-                const countElement = page.locator('.js__searchRecruit--count').first();
-                if (await countElement.count() > 0) {
-                    const text = await countElement.textContent();
-                    if (text) {
-                        const num = parseInt(text.replace(/,/g, ''), 10);
-                        if (!isNaN(num)) {
-                            log(`Total jobs: ${num}`);
-                            onTotalCount(num);
+                const selectors = [
+                    'span.total_txt.total_num',
+                    '.total_txt.total_num',
+                    '.js__searchRecruit--count',
+                ];
+                for (const selector of selectors) {
+                    const countElement = page.locator(selector).first();
+                    if (await countElement.count() > 0) {
+                        const text = await countElement.textContent();
+                        if (text) {
+                            const num = parseInt(text.replace(/,/g, ''), 10);
+                            if (!isNaN(num)) {
+                                log(`Total jobs: ${num}`);
+                                onTotalCount(num);
+                                break;
+                            }
                         }
                     }
                 }
             }
 
+            // ランクフィルターの設定
+            // Mynaviのランク: A=注目ラベル, B=新着ラベル, C=ラベルなし
+            const rankFilter = params.rankFilter;
+            const includeA = !rankFilter || rankFilter.length === 0 || rankFilter.includes('A');
+            const includeB = !rankFilter || rankFilter.length === 0 || rankFilter.includes('B');
+            const includeC = !rankFilter || rankFilter.length === 0 || rankFilter.includes('C');
+
+            if (rankFilter && rankFilter.length > 0) {
+                log(`ランクフィルター: ${rankFilter.join(', ')} (A=${includeA}, B=${includeB}, C=${includeC})`);
+            }
+
+            // スキップカウント
+            let skippedA = 0;
+            let skippedB = 0;
+            let skippedC = 0;
+
             let hasNext = true;
             let pageNum = 0;
+            let globalIndex = 0;
             const maxPages = 500;
 
             while (hasNext && pageNum < maxPages) {
@@ -1060,10 +1058,40 @@ export class MynaviStrategy implements ScrapingStrategy {
                     try {
                         const card = jobCards[i];
 
-                        // ランク判定
+                        // ランク判定（実際のHTML調査結果に基づく）
+                        // 「注目」ラベル (.attention.box): A級
+                        // 「新着」ラベル (.new.box): B級
+                        // ラベルなし: C級
+                        const hasAttentionBox = await card.locator('.attention.box').count() > 0;
                         const dataTy = await card.getAttribute('data-ty');
                         const hasAttentionLabel = await card.locator('.cassetteRecruitRecommend__label--attention').count() > 0;
-                        const rank: BudgetRank = (dataTy === 'rzs' || hasAttentionLabel) ? 'A' : (pageNum === 1 ? 'B' : 'C');
+                        const hasNewBox = await card.locator('.new.box').count() > 0;
+
+                        let rank: BudgetRank;
+                        if (hasAttentionBox || dataTy === 'rzs' || hasAttentionLabel) {
+                            rank = 'A';  // 最上位プラン
+                        } else if (hasNewBox) {
+                            rank = 'B';  // 新着（標準プラン）
+                        } else {
+                            rank = 'C';  // 通常プラン
+                        }
+
+                        // ランクフィルターでスキップ判定
+                        if (rank === 'A' && !includeA) {
+                            skippedA++;
+                            globalIndex++;
+                            continue;
+                        }
+                        if (rank === 'B' && !includeB) {
+                            skippedB++;
+                            globalIndex++;
+                            continue;
+                        }
+                        if (rank === 'C' && !includeC) {
+                            skippedC++;
+                            globalIndex++;
+                            continue;
+                        }
 
                         // URLを取得
                         let url: string | null = null;
@@ -1075,7 +1103,10 @@ export class MynaviStrategy implements ScrapingStrategy {
                             }
                         }
 
-                        if (!url || url.includes('javascript:')) continue;
+                        if (!url || url.includes('javascript:')) {
+                            globalIndex++;
+                            continue;
+                        }
 
                         // URL正規化
                         let fullUrl: string;
@@ -1087,7 +1118,10 @@ export class MynaviStrategy implements ScrapingStrategy {
                             fullUrl = `https://tenshoku.mynavi.jp${url.startsWith('/') ? '' : '/'}${url}`;
                         }
 
-                        if (!fullUrl.includes('mynavi.jp')) continue;
+                        if (!fullUrl.includes('mynavi.jp')) {
+                            globalIndex++;
+                            continue;
+                        }
                         if (fullUrl.includes('/msg/')) {
                             fullUrl = fullUrl.replace(/\/msg\/?$/, '/');
                         }
@@ -1117,10 +1151,13 @@ export class MynaviStrategy implements ScrapingStrategy {
                             companyName,
                             jobTitle,
                             rank,
-                            displayIndex: (pageNum - 1) * 50 + i,
+                            displayIndex: globalIndex,
                         });
+
+                        globalIndex++;
                     } catch (err) {
                         // 個別エラーは無視
+                        globalIndex++;
                     }
                 }
 
@@ -1138,6 +1175,15 @@ export class MynaviStrategy implements ScrapingStrategy {
                 }
             }
 
+            // スキップ結果をログ出力
+            const skippedTotal = skippedA + skippedB + skippedC;
+            if (skippedTotal > 0) {
+                const skippedDetails = [];
+                if (skippedA > 0) skippedDetails.push(`A:${skippedA}`);
+                if (skippedB > 0) skippedDetails.push(`B:${skippedB}`);
+                if (skippedC > 0) skippedDetails.push(`C:${skippedC}`);
+                log(`スキップ: ${skippedTotal}件 (${skippedDetails.join(', ')})`);
+            }
             log(`Collected ${allJobs.length} job URLs from ${pageNum} pages`);
             return allJobs;
 
@@ -1229,8 +1275,8 @@ export class MynaviStrategy implements ScrapingStrategy {
                         await this.extractTableValue(page, '年収');
                 } catch { /* ignore */ }
 
-                const normalizedAddress = this.normalizeAddress(address);
-                const cleanName = this.cleanCompanyName(companyName);
+                const normalizedAddress = normalizeAddressUtil(address);
+                const cleanName = cleanCompanyNameUtil(companyName);
 
                 return {
                     source: this.source,
@@ -1243,7 +1289,7 @@ export class MynaviStrategy implements ScrapingStrategy {
                     employees: normalizeEmployees(employees),
                     phone: undefined,
                     address: normalizedAddress,
-                    area: normalizeArea(this.extractAreaFromAddress(normalizedAddress)),
+                    area: normalizeArea(extractPrefectureFromAddress(normalizedAddress)),
                     homepage_url: companyUrl,
                     industry: normalizeIndustry(industry),
                     scrape_status: 'step1_completed',

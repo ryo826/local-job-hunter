@@ -190,6 +190,13 @@ ipcMain.handle('scraper:stop', async () => {
     return { success: true };
 });
 
+ipcMain.handle('scraper:confirm', async (_event, proceed: boolean) => {
+    if (scrapingEngine) {
+        scrapingEngine.confirm(proceed);
+    }
+    return { success: true };
+});
+
 // Google Maps API Enrichment
 ipcMain.handle('enrich:startPhoneLookup', async () => {
     try {

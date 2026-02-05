@@ -1,199 +1,64 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select';
-import {
-    ExternalLink,
-    Eye,
-    Phone,
     Loader2,
     Download,
     ChevronDown,
     ChevronUp,
-    ArrowUpDown,
-    ArrowUp,
-    ArrowDown,
     Trash2,
     Search,
     Filter,
     RefreshCw,
-    Building2,
-    MapPin,
-    Briefcase,
+    Phone,
     X,
     RotateCcw,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
-import type { Company, BudgetRank } from '@/types';
-import { formatCompanyData } from '@/utils/companyFormatter';
+import type { Company } from '@/types';
 import { cn } from '@/lib/utils';
+import type { FilterTab, SortColumn, SortDirection } from './components/list/constants';
+import { prefectureToRegion } from './components/list/constants';
+import {
+    formatJobPageUpdated,
+    formatLastFetched,
+    parseSalary,
+    parseEmployees,
+} from './components/list/utils';
+import { CompanyFilters } from './components/list/CompanyFilters';
+import { CompanyTable } from './components/list/CompanyTable';
+import { CompanyDetailPanel } from './components/list/CompanyDetailPanel';
+import { DeleteConfirmDialog, UpdateResultsDialog } from './components/list/CompanyDialogs';
 
 interface ListPageProps {
     sidebarCollapsed?: boolean;
 }
 
-// ランク定義（ツールチップ用）
-const RANK_DEFINITIONS = {
-    A: {
-        label: '高予算層',
-        description: 'プレミアム枠・PR枠・Job Flair等の有料オプション使用',
-    },
-    B: {
-        label: '中予算層',
-        description: '1ページ目表示(上位30〜100件)',
-    },
-    C: {
-        label: '低予算層',
-        description: '2ページ目以降または下位表示',
-    }
-} as const;
+interface ColumnFilterState {
+    industry: string;
+    area: string;
+    salary: string;
+    employees: string;
+    source: string;
+    rank: string;
+    status: string;
+    jobPageUpdated: string;
+    lastFetched: string;
+    jobType: string;
+}
 
-// Rank badge config
-const rankConfig: Record<BudgetRank, { label: string; className: string }> = {
-    A: { label: 'A', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300 font-bold' },
-    B: { label: 'B', className: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 font-bold' },
-    C: { label: 'C', className: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 font-bold' },
-};
-
-// Sort types
-type SortColumn = 'industry' | 'area' | 'salary' | 'employees' | 'source' | 'jobPageUpdated' | 'lastFetched' | 'status' | null;
-type SortDirection = 'asc' | 'desc';
-
-// Filter tab options
-type FilterTab = '勤務地' | '職種';
-
-// Region checkbox options
-const regionCheckboxOptions = [
-    '北海道', '東北', '関東', '甲信越', '北陸',
-    '東海', '関西', '中国', '四国', '九州・沖縄'
-];
-
-// Job type checkbox options
-const jobTypeCheckboxOptions = [
-    '営業・販売',
-    '経営・事業企画・人事・事務',
-    'IT・Web・ゲームエンジニア',
-    'モノづくりエンジニア',
-    'コンサルタント・士業・金融',
-    'サービス・販売・接客',
-    '不動産・建設',
-    '物流・運輸・運転',
-    'その他'
-];
-
-// Map prefectures to regions
-const prefectureToRegion: Record<string, string> = {
-    '北海道': '北海道',
-    '青森県': '東北', '岩手県': '東北', '宮城県': '東北', '秋田県': '東北', '山形県': '東北', '福島県': '東北',
-    '茨城県': '関東', '栃木県': '関東', '群馬県': '関東', '埼玉県': '関東', '千葉県': '関東', '東京都': '関東', '神奈川県': '関東',
-    '新潟県': '甲信越', '山梨県': '甲信越', '長野県': '甲信越',
-    '富山県': '北陸', '石川県': '北陸', '福井県': '北陸',
-    '岐阜県': '東海', '静岡県': '東海', '愛知県': '東海', '三重県': '東海',
-    '滋賀県': '関西', '京都府': '関西', '大阪府': '関西', '兵庫県': '関西', '奈良県': '関西', '和歌山県': '関西',
-    '鳥取県': '中国', '島根県': '中国', '岡山県': '中国', '広島県': '中国', '山口県': '中国',
-    '徳島県': '四国', '香川県': '四国', '愛媛県': '四国', '高知県': '四国',
-    '福岡県': '九州・沖縄', '佐賀県': '九州・沖縄', '長崎県': '九州・沖縄', '熊本県': '九州・沖縄',
-    '大分県': '九州・沖縄', '宮崎県': '九州・沖縄', '鹿児島県': '九州・沖縄', '沖縄県': '九州・沖縄',
-};
-
-// Source badge config
-const sourceConfig: Record<string, { label: string; className: string }> = {
-    mynavi: { label: 'マイナビ', className: 'bg-sky-100 text-sky-700 dark:bg-sky-900 dark:text-sky-300' },
-    rikunabi: { label: 'リクナビ', className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300' },
-    doda: { label: 'doda', className: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300' },
-};
-
-// 求人ページ更新日のフォーマットと鮮度判定
-const formatJobPageUpdated = (dateStr: string | null): { text: string; daysAgo: number; className: string } => {
-    if (!dateStr) {
-        return { text: '-', daysAgo: -1, className: 'text-muted-foreground' };
-    }
-
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const daysAgo = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-    // 日付フォーマット: M/D
-    const formatted = `${date.getMonth() + 1}/${date.getDate()}`;
-    let className: string;
-
-    if (daysAgo <= 3) {
-        className = 'text-green-600 dark:text-green-400';  // 最新
-    } else if (daysAgo <= 7) {
-        className = 'text-blue-600 dark:text-blue-400';    // 比較的新しい
-    } else if (daysAgo <= 14) {
-        className = 'text-yellow-600 dark:text-yellow-400'; // やや古い
-    } else {
-        className = 'text-red-600 dark:text-red-400';      // 古い
-    }
-
-    return { text: `${formatted} (${daysAgo}日前)`, daysAgo, className };
-};
-
-// 最終取得日のフォーマットと鮮度判定
-const formatLastFetched = (dateStr: string | null): { text: string; daysAgo: number; className: string } => {
-    if (!dateStr) {
-        return { text: '-', daysAgo: -1, className: 'text-muted-foreground' };
-    }
-
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const daysAgo = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-    let text: string;
-    let className: string;
-
-    if (daysAgo === 0) {
-        text = '今日';
-        className = 'text-green-600 dark:text-green-400';
-    } else if (daysAgo === 1) {
-        text = '昨日';
-        className = 'text-green-600 dark:text-green-400';
-    } else if (daysAgo <= 3) {
-        text = `${daysAgo}日前`;
-        className = 'text-blue-600 dark:text-blue-400';
-    } else if (daysAgo <= 7) {
-        text = `${daysAgo}日前`;
-        className = 'text-yellow-600 dark:text-yellow-400';
-    } else if (daysAgo <= 30) {
-        text = `${daysAgo}日前`;
-        className = 'text-orange-600 dark:text-orange-400';
-    } else {
-        text = `${daysAgo}日前`;
-        className = 'text-red-600 dark:text-red-400';
-    }
-
-    return { text, daysAgo, className };
-};
-
-// Status badge config
-const statusConfig: Record<string, { label: string; className: string }> = {
-    new: { label: '新規', className: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' },
-    unreachable: { label: '不通', className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300' },
-    promising: { label: '見込み', className: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300' },
-    keyman: { label: 'キーマン', className: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300' },
-    meeting: { label: '商談中', className: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300' },
-    won: { label: '成約', className: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' },
-    lost: { label: '失注', className: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300' },
-    ng: { label: 'NG', className: 'bg-red-200 text-red-800 dark:bg-red-950 dark:text-red-300' },
+const DEFAULT_COLUMN_FILTERS: ColumnFilterState = {
+    industry: 'all',
+    area: 'all',
+    salary: 'all',
+    employees: 'all',
+    source: 'all',
+    rank: 'all',
+    status: 'all',
+    jobPageUpdated: 'all',
+    lastFetched: 'all',
+    jobType: 'all',
 };
 
 export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
@@ -237,15 +102,7 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
     const [showUpdateResults, setShowUpdateResults] = useState(false);
 
     // Column filters
-    const [industryFilter, setIndustryFilter] = useState<string>('all');
-    const [areaFilter, setAreaFilter] = useState<string>('all');
-    const [salaryFilter, setSalaryFilter] = useState<string>('all');
-    const [employeesFilter, setEmployeesFilter] = useState<string>('all');
-    const [sourceFilter, setSourceFilter] = useState<string>('all');
-    const [rankFilter, setRankFilter] = useState<string>('all');
-    const [statusFilter, setStatusFilter] = useState<string>('all');
-    const [jobPageUpdatedFilter, setJobPageUpdatedFilter] = useState<string>('all');
-    const [lastFetchedFilter, setLastFetchedFilter] = useState<string>('all');
+    const [columnFilters, setColumnFilters] = useState<ColumnFilterState>(DEFAULT_COLUMN_FILTERS);
 
     // Sorting state
     const [sortColumn, setSortColumn] = useState<SortColumn>(null);
@@ -260,7 +117,6 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
             if (isDetailOpen && detailPanelRef.current && !detailPanelRef.current.contains(event.target as Node)) {
-                // Check if click is on a button that opens detail (Eye icon)
                 const target = event.target as HTMLElement;
                 if (!target.closest('[data-detail-trigger]')) {
                     setIsDetailOpen(false);
@@ -300,7 +156,6 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
         setIsEnriching(true);
         setEnrichProgress(null);
 
-        // Set up progress listener
         window.electronAPI.enrich.onProgress((progress) => {
             setEnrichProgress(progress);
         });
@@ -382,15 +237,7 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
     const resetAllFilters = () => {
         setSelectedRegions(new Set());
         setSelectedJobTypes(new Set());
-        setIndustryFilter('all');
-        setAreaFilter('all');
-        setSalaryFilter('all');
-        setEmployeesFilter('all');
-        setSourceFilter('all');
-        setRankFilter('all');
-        setStatusFilter('all');
-        setJobPageUpdatedFilter('all');
-        setLastFetchedFilter('all');
+        setColumnFilters(DEFAULT_COLUMN_FILTERS);
         setSortColumn(null);
         setSortDirection('asc');
     };
@@ -418,46 +265,6 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
             }
             return newSet;
         });
-    };
-
-    // Generate unique filter options from data
-    const filterOptions = useMemo(() => {
-        const industries = new Set<string>();
-        const areas = new Set<string>();
-        const sources = new Set<string>();
-
-        companies.forEach(company => {
-            if (company.industry) {
-                const shortIndustry = company.industry.substring(0, 20);
-                industries.add(shortIndustry);
-            }
-            if (company.area) areas.add(company.area);
-            if (company.source) sources.add(company.source);
-        });
-
-        return {
-            industries: Array.from(industries).sort(),
-            areas: Array.from(areas).sort(),
-            sources: Array.from(sources).sort(),
-            salaryRanges: ['300万未満', '300-500万', '500-700万', '700-1000万', '1000万以上'],
-            employeeRanges: ['10人未満', '10-50人', '50-100人', '100-500人', '500人以上'],
-            jobPageUpdatedRanges: ['3日以内', '7日以内', '14日以内', '14日以上'],
-            lastFetchedRanges: ['今日', '3日以内', '7日以内', '7日以上'],
-        };
-    }, [companies]);
-
-    // Parse salary to number for comparison
-    const parseSalary = (salaryText: string | null): number => {
-        if (!salaryText) return 0;
-        const match = salaryText.match(/(\d+)/);
-        return match ? parseInt(match[1], 10) : 0;
-    };
-
-    // Parse employees to number for comparison
-    const parseEmployees = (employeesText: string | null): number => {
-        if (!employeesText) return 0;
-        const match = employeesText.match(/(\d+)/);
-        return match ? parseInt(match[1], 10) : 0;
     };
 
     // Check if salary matches filter
@@ -527,7 +334,7 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
                 }
             }
 
-            // Job type filter
+            // Job type filter (from checkbox panel)
             if (selectedJobTypes.size > 0) {
                 const jobTitle = company.job_title?.toLowerCase() || '';
                 const industry = company.industry?.toLowerCase() || '';
@@ -559,15 +366,16 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
             }
 
             // Column filters
-            if (industryFilter !== 'all' && !company.industry?.startsWith(industryFilter)) return false;
-            if (areaFilter !== 'all' && company.area !== areaFilter) return false;
-            if (sourceFilter !== 'all' && company.source !== sourceFilter) return false;
-            if (!matchesSalaryFilter(company.salary_text, salaryFilter)) return false;
-            if (!matchesEmployeesFilter(company.employees, employeesFilter)) return false;
-            if (rankFilter !== 'all' && company.budget_rank !== rankFilter) return false;
-            if (statusFilter !== 'all' && company.status !== statusFilter) return false;
-            if (!matchesJobPageUpdatedFilter(company.job_page_updated_at, jobPageUpdatedFilter)) return false;
-            if (!matchesLastFetchedFilter(company.last_updated_at || company.created_at, lastFetchedFilter)) return false;
+            if (columnFilters.industry !== 'all' && !company.industry?.startsWith(columnFilters.industry)) return false;
+            if (columnFilters.area !== 'all' && company.area !== columnFilters.area) return false;
+            if (columnFilters.source !== 'all' && company.source !== columnFilters.source) return false;
+            if (!matchesSalaryFilter(company.salary_text, columnFilters.salary)) return false;
+            if (!matchesEmployeesFilter(company.employees, columnFilters.employees)) return false;
+            if (columnFilters.rank !== 'all' && company.budget_rank !== columnFilters.rank) return false;
+            if (columnFilters.status !== 'all' && company.status !== columnFilters.status) return false;
+            if (!matchesJobPageUpdatedFilter(company.job_page_updated_at, columnFilters.jobPageUpdated)) return false;
+            if (!matchesLastFetchedFilter(company.last_updated_at || company.created_at, columnFilters.lastFetched)) return false;
+            if (columnFilters.jobType !== 'all' && company.job_type !== columnFilters.jobType) return false;
 
             return true;
         });
@@ -611,6 +419,10 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
                         aVal = a.status || '';
                         bVal = b.status || '';
                         break;
+                    case 'jobType':
+                        aVal = a.job_type || '';
+                        bVal = b.job_type || '';
+                        break;
                 }
 
                 if (typeof aVal === 'number' && typeof bVal === 'number') {
@@ -622,7 +434,7 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
         }
 
         return result;
-    }, [companies, selectedRegions, selectedJobTypes, industryFilter, areaFilter, salaryFilter, employeesFilter, sourceFilter, rankFilter, statusFilter, jobPageUpdatedFilter, lastFetchedFilter, sortColumn, sortDirection]);
+    }, [companies, selectedRegions, selectedJobTypes, columnFilters, sortColumn, sortDirection]);
 
     // Handle sort column click
     const handleSort = (column: SortColumn) => {
@@ -637,16 +449,6 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
             setSortColumn(column);
             setSortDirection('asc');
         }
-    };
-
-    // Get sort icon for column
-    const getSortIcon = (column: SortColumn) => {
-        if (sortColumn !== column) {
-            return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />;
-        }
-        return sortDirection === 'asc'
-            ? <ArrowUp className="h-3 w-3 ml-1 text-primary" />
-            : <ArrowDown className="h-3 w-3 ml-1 text-primary" />;
     };
 
     const toggleRowSelection = (id: number) => {
@@ -669,40 +471,6 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
         }
     };
 
-    const getSourceBadge = (source: string) => {
-        const config = sourceConfig[source] || { label: source, className: 'bg-slate-100 text-slate-700' };
-        return (
-            <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', config.className)}>
-                {config.label}
-            </span>
-        );
-    };
-
-    const getStatusBadge = (status: string) => {
-        const config = statusConfig[status] || { label: status, className: 'bg-slate-100 text-slate-700' };
-        return (
-            <span className={cn('px-3 py-1 rounded-full text-xs font-medium', config.className)}>
-                {config.label}
-            </span>
-        );
-    };
-
-    const getRankBadge = (rank: BudgetRank | null) => {
-        if (!rank) {
-            return <span className="text-muted-foreground text-xs">-</span>;
-        }
-        const config = rankConfig[rank];
-        const definition = RANK_DEFINITIONS[rank];
-        return (
-            <span
-                className={cn('px-2 py-0.5 rounded-full text-xs', config.className)}
-                title={definition.description}
-            >
-                {config.label}
-            </span>
-        );
-    };
-
     const handleStatusChange = async (id: number, newStatus: string) => {
         await updateCompany(id, { status: newStatus });
         fetchCompanies();
@@ -716,16 +484,16 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
         }
     };
 
+    const handleUpdateNote = async (id: number, note: string) => {
+        await updateCompany(id, { note });
+    };
+
+    const handleColumnFilterChange = (column: keyof ColumnFilterState, value: string) => {
+        setColumnFilters(prev => ({ ...prev, [column]: value }));
+    };
+
     const activeFiltersCount = selectedRegions.size + selectedJobTypes.size +
-        (industryFilter !== 'all' ? 1 : 0) +
-        (areaFilter !== 'all' ? 1 : 0) +
-        (salaryFilter !== 'all' ? 1 : 0) +
-        (employeesFilter !== 'all' ? 1 : 0) +
-        (sourceFilter !== 'all' ? 1 : 0) +
-        (rankFilter !== 'all' ? 1 : 0) +
-        (statusFilter !== 'all' ? 1 : 0) +
-        (jobPageUpdatedFilter !== 'all' ? 1 : 0) +
-        (lastFetchedFilter !== 'all' ? 1 : 0);
+        Object.values(columnFilters).filter(v => v !== 'all').length;
 
     return (
         <div className="space-y-4">
@@ -942,758 +710,60 @@ export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
 
             {/* Expandable Filter Section */}
             {isFilterExpanded && (
-                <Card className="p-5 rounded-2xl" ref={filterPanelRef}>
-                    {/* Filter Tabs */}
-                    <div className="flex gap-1 mb-4">
-                        {(['勤務地', '職種'] as FilterTab[]).map(tab => (
-                            <button
-                                key={tab}
-                                className={cn(
-                                    'px-4 py-2 text-sm font-medium rounded-xl transition-all',
-                                    activeFilterTab === tab
-                                        ? 'bg-primary text-primary-foreground'
-                                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                                )}
-                                onClick={() => setActiveFilterTab(tab)}
-                            >
-                                {tab === '勤務地' && <MapPin className="h-4 w-4 inline mr-1.5" />}
-                                {tab === '職種' && <Briefcase className="h-4 w-4 inline mr-1.5" />}
-                                {tab}
-                                {tab === '勤務地' && selectedRegions.size > 0 && (
-                                    <Badge className="ml-1.5 h-5 px-1.5 rounded-full text-xs">
-                                        {selectedRegions.size}
-                                    </Badge>
-                                )}
-                                {tab === '職種' && selectedJobTypes.size > 0 && (
-                                    <Badge className="ml-1.5 h-5 px-1.5 rounded-full text-xs">
-                                        {selectedJobTypes.size}
-                                    </Badge>
-                                )}
-                            </button>
-                        ))}
-                    </div>
-
-                    {/* Filter Content */}
-                    <div className="min-h-[100px]">
-                        {activeFilterTab === '勤務地' && (
-                            <div className="grid grid-cols-5 gap-2">
-                                {regionCheckboxOptions.map(region => (
-                                    <label
-                                        key={region}
-                                        className={cn(
-                                            'flex items-center gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all',
-                                            selectedRegions.has(region)
-                                                ? 'border-primary bg-primary/5'
-                                                : 'border-border hover:border-muted-foreground/30'
-                                        )}
-                                    >
-                                        <Checkbox
-                                            checked={selectedRegions.has(region)}
-                                            onCheckedChange={() => toggleRegion(region)}
-                                        />
-                                        <span className="text-sm">{region}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        )}
-
-                        {activeFilterTab === '職種' && (
-                            <div className="grid grid-cols-3 gap-2">
-                                {jobTypeCheckboxOptions.map(jobType => (
-                                    <label
-                                        key={jobType}
-                                        className={cn(
-                                            'flex items-center gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all',
-                                            selectedJobTypes.has(jobType)
-                                                ? 'border-primary bg-primary/5'
-                                                : 'border-border hover:border-muted-foreground/30'
-                                        )}
-                                    >
-                                        <Checkbox
-                                            checked={selectedJobTypes.has(jobType)}
-                                            onCheckedChange={() => toggleJobType(jobType)}
-                                        />
-                                        <span className="text-sm">{jobType}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Clear Filters */}
-                    {activeFiltersCount > 0 && (
-                        <div className="mt-4 pt-4 border-t flex justify-end">
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-destructive hover:text-destructive"
-                                onClick={resetAllFilters}
-                            >
-                                <X className="h-4 w-4 mr-1" />
-                                すべてクリア
-                            </Button>
-                        </div>
-                    )}
-                </Card>
+                <CompanyFilters
+                    activeFilterTab={activeFilterTab}
+                    setActiveFilterTab={setActiveFilterTab}
+                    selectedRegions={selectedRegions}
+                    toggleRegion={toggleRegion}
+                    selectedJobTypes={selectedJobTypes}
+                    toggleJobType={toggleJobType}
+                    activeFiltersCount={activeFiltersCount}
+                    resetAllFilters={resetAllFilters}
+                    filterPanelRef={filterPanelRef}
+                />
             )}
 
             {/* Data Table */}
-            <Card className="overflow-hidden rounded-2xl">
-                <div className="overflow-auto max-h-[calc(100vh-280px)]">
-                    <table className="w-full text-sm min-w-[1600px]">
-                        <thead className="bg-muted/50 border-b sticky top-0 z-10">
-                            <tr>
-                                <th className="p-3 w-10 bg-muted/50">
-                                    <Checkbox
-                                        checked={selectedRows.size === filteredCompanies.length && filteredCompanies.length > 0}
-                                        onCheckedChange={toggleAllSelection}
-                                    />
-                                </th>
-                                <th className="p-3 text-left font-medium w-[180px] bg-muted/50">会社名</th>
-                                <th className="p-2 text-left font-medium w-[70px] bg-muted/50">
-                                    <div className="space-y-1">
-                                        <span>ランク</span>
-                                        <Select value={rankFilter} onValueChange={setRankFilter}>
-                                            <SelectTrigger className="h-7 text-xs w-[60px] rounded-lg">
-                                                <SelectValue placeholder="全て" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">全て</SelectItem>
-                                                <SelectItem value="A">A</SelectItem>
-                                                <SelectItem value="B">B</SelectItem>
-                                                <SelectItem value="C">C</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </th>
-                                <th className="p-3 text-left font-medium w-[50px] bg-muted/50">詳細</th>
-                                <th className="p-3 text-left font-medium w-[110px] bg-muted/50">電話番号</th>
-                                <th className="p-3 text-left font-medium w-[60px] bg-muted/50">HP</th>
-                                <th className="p-2 text-left font-medium w-[100px] bg-muted/50">
-                                    <div className="space-y-1">
-                                        <button
-                                            className="flex items-center hover:text-primary transition-colors"
-                                            onClick={() => handleSort('industry')}
-                                        >
-                                            業種{getSortIcon('industry')}
-                                        </button>
-                                        <Select value={industryFilter} onValueChange={setIndustryFilter}>
-                                            <SelectTrigger className="h-7 text-xs w-[90px] rounded-lg">
-                                                <SelectValue placeholder="全て" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">全て</SelectItem>
-                                                {filterOptions.industries.slice(0, 20).map(opt => (
-                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </th>
-                                <th className="p-2 text-left font-medium w-[100px] bg-muted/50">
-                                    <div className="space-y-1">
-                                        <button
-                                            className="flex items-center hover:text-primary transition-colors"
-                                            onClick={() => handleSort('area')}
-                                        >
-                                            エリア{getSortIcon('area')}
-                                        </button>
-                                        <Select value={areaFilter} onValueChange={setAreaFilter}>
-                                            <SelectTrigger className="h-7 text-xs w-[90px] rounded-lg">
-                                                <SelectValue placeholder="全て" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">全て</SelectItem>
-                                                {filterOptions.areas.map(opt => (
-                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </th>
-                                <th className="p-2 text-left font-medium w-[100px] bg-muted/50">
-                                    <div className="space-y-1">
-                                        <button
-                                            className="flex items-center hover:text-primary transition-colors"
-                                            onClick={() => handleSort('salary')}
-                                        >
-                                            給与{getSortIcon('salary')}
-                                        </button>
-                                        <Select value={salaryFilter} onValueChange={setSalaryFilter}>
-                                            <SelectTrigger className="h-7 text-xs w-[90px] rounded-lg">
-                                                <SelectValue placeholder="全て" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">全て</SelectItem>
-                                                {filterOptions.salaryRanges.map(opt => (
-                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </th>
-                                <th className="p-2 text-left font-medium w-[100px] bg-muted/50">
-                                    <div className="space-y-1">
-                                        <button
-                                            className="flex items-center hover:text-primary transition-colors"
-                                            onClick={() => handleSort('employees')}
-                                        >
-                                            規模{getSortIcon('employees')}
-                                        </button>
-                                        <Select value={employeesFilter} onValueChange={setEmployeesFilter}>
-                                            <SelectTrigger className="h-7 text-xs w-[90px] rounded-lg">
-                                                <SelectValue placeholder="全て" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">全て</SelectItem>
-                                                {filterOptions.employeeRanges.map(opt => (
-                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </th>
-                                <th className="p-2 text-left font-medium w-[100px] bg-muted/50">
-                                    <div className="space-y-1">
-                                        <button
-                                            className="flex items-center hover:text-primary transition-colors"
-                                            onClick={() => handleSort('source')}
-                                        >
-                                            ソース{getSortIcon('source')}
-                                        </button>
-                                        <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                                            <SelectTrigger className="h-7 text-xs w-[90px] rounded-lg">
-                                                <SelectValue placeholder="全て" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">全て</SelectItem>
-                                                {filterOptions.sources.map(opt => (
-                                                    <SelectItem key={opt} value={opt}>
-                                                        {sourceConfig[opt]?.label || opt}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </th>
-                                <th className="p-2 text-left font-medium w-[100px] bg-muted/50">
-                                    <div className="space-y-1">
-                                        <button
-                                            className="flex items-center hover:text-primary transition-colors"
-                                            onClick={() => handleSort('jobPageUpdated')}
-                                            title="求人サイト上での情報更新日"
-                                        >
-                                            求人更新{getSortIcon('jobPageUpdated')}
-                                        </button>
-                                        <Select value={jobPageUpdatedFilter} onValueChange={setJobPageUpdatedFilter}>
-                                            <SelectTrigger className="h-7 text-xs w-[90px] rounded-lg">
-                                                <SelectValue placeholder="全て" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">全て</SelectItem>
-                                                {filterOptions.jobPageUpdatedRanges.map(opt => (
-                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </th>
-                                <th className="p-2 text-left font-medium w-[90px] bg-muted/50">
-                                    <div className="space-y-1">
-                                        <button
-                                            className="flex items-center hover:text-primary transition-colors"
-                                            onClick={() => handleSort('lastFetched')}
-                                            title="このシステムが情報を取得した日時"
-                                        >
-                                            取得日{getSortIcon('lastFetched')}
-                                        </button>
-                                        <Select value={lastFetchedFilter} onValueChange={setLastFetchedFilter}>
-                                            <SelectTrigger className="h-7 text-xs w-[80px] rounded-lg">
-                                                <SelectValue placeholder="全て" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">全て</SelectItem>
-                                                {filterOptions.lastFetchedRanges.map(opt => (
-                                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </th>
-                                <th className="p-2 text-left font-medium w-[100px] bg-muted/50">
-                                    <div className="space-y-1">
-                                        <button
-                                            className="flex items-center hover:text-primary transition-colors"
-                                            onClick={() => handleSort('status')}
-                                        >
-                                            ステータス{getSortIcon('status')}
-                                        </button>
-                                        <Select value={statusFilter} onValueChange={setStatusFilter}>
-                                            <SelectTrigger className="h-7 text-xs w-[90px] rounded-lg">
-                                                <SelectValue placeholder="全て" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">全て</SelectItem>
-                                                <SelectItem value="new">新規</SelectItem>
-                                                <SelectItem value="promising">見込み</SelectItem>
-                                                <SelectItem value="meeting">商談中</SelectItem>
-                                                <SelectItem value="won">成約</SelectItem>
-                                                <SelectItem value="ng">NG</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                            {filteredCompanies.map((company) => {
-                                const formatted = formatCompanyData(company);
-
-                                return (
-                                    <tr
-                                        key={company.id}
-                                        className={cn(
-                                            'h-12 transition-colors',
-                                            selectedRows.has(company.id)
-                                                ? 'bg-primary/5'
-                                                : 'hover:bg-muted/50'
-                                        )}
-                                    >
-                                        <td className="p-3">
-                                            <Checkbox
-                                                checked={selectedRows.has(company.id)}
-                                                onCheckedChange={() => toggleRowSelection(company.id)}
-                                            />
-                                        </td>
-
-                                        <td className="p-3">
-                                            <a
-                                                href={company.url}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="text-primary hover:underline truncate max-w-[160px] font-medium block"
-                                                title={formatted.fullCompanyName}
-                                            >
-                                                {formatted.companyName}
-                                            </a>
-                                        </td>
-
-                                        <td className="p-3 text-center">
-                                            {getRankBadge(company.budget_rank)}
-                                        </td>
-
-                                        <td className="p-3">
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-8 w-8 rounded-lg"
-                                                onClick={() => handleViewDetail(company)}
-                                                title="詳細"
-                                                data-detail-trigger
-                                            >
-                                                <Eye className="h-4 w-4" />
-                                            </Button>
-                                        </td>
-
-                                        <td className="p-3">
-                                            {company.phone ? (
-                                                <span
-                                                    className="text-primary cursor-pointer hover:underline truncate block max-w-[100px] font-mono text-xs"
-                                                    onClick={() => navigator.clipboard.writeText(company.phone!)}
-                                                    title={`${company.phone} (クリックでコピー)`}
-                                                >
-                                                    {company.phone}
-                                                </span>
-                                            ) : (
-                                                <span className="text-muted-foreground">-</span>
-                                            )}
-                                        </td>
-
-                                        <td className="p-3">
-                                            {company.homepage_url ? (
-                                                <a
-                                                    href={company.homepage_url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="inline-flex items-center gap-1 text-primary hover:underline"
-                                                    title={company.homepage_url}
-                                                >
-                                                    <ExternalLink className="h-3.5 w-3.5" />
-                                                    <span className="text-xs">HP</span>
-                                                </a>
-                                            ) : (
-                                                <span className="text-muted-foreground">-</span>
-                                            )}
-                                        </td>
-
-                                        <td className="p-3 w-[100px]">
-                                            <span
-                                                className="text-muted-foreground truncate block max-w-[90px] text-xs"
-                                                title={formatted.fullIndustry}
-                                            >
-                                                {formatted.industry}
-                                            </span>
-                                        </td>
-
-                                        <td className="p-3 w-[100px]">
-                                            <span className="text-muted-foreground truncate block max-w-[90px] text-xs">
-                                                {formatted.area}
-                                            </span>
-                                        </td>
-
-                                        <td className="p-3 w-[100px]">
-                                            <span
-                                                className="text-foreground truncate block max-w-[90px] text-xs"
-                                                title={formatted.fullSalary}
-                                            >
-                                                {formatted.salary}
-                                            </span>
-                                        </td>
-
-                                        <td className="p-3 w-[100px]">
-                                            <span
-                                                className="text-muted-foreground truncate block max-w-[90px] text-xs"
-                                                title={formatted.fullScale}
-                                            >
-                                                {formatted.scale}
-                                            </span>
-                                        </td>
-
-                                        <td className="p-3 w-[100px]">
-                                            {getSourceBadge(company.source)}
-                                        </td>
-
-                                        <td className="p-3 w-[100px]">
-                                            {(() => {
-                                                const jobPageUpdated = formatJobPageUpdated(company.job_page_updated_at);
-                                                return (
-                                                    <div className="flex flex-col">
-                                                        <span
-                                                            className={cn('text-xs font-medium', jobPageUpdated.className)}
-                                                            title={company.job_page_updated_at || ''}
-                                                        >
-                                                            {jobPageUpdated.text}
-                                                        </span>
-                                                        {company.job_page_end_date && (
-                                                            <span className="text-xs text-muted-foreground" title="掲載終了予定日">
-                                                                終了: {new Date(company.job_page_end_date).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })()}
-                                        </td>
-
-                                        <td className="p-3 w-[90px]">
-                                            {(() => {
-                                                const lastFetched = formatLastFetched(company.last_updated_at || company.created_at);
-                                                return (
-                                                    <span
-                                                        className={cn('text-xs font-medium', lastFetched.className)}
-                                                        title={company.last_updated_at || company.created_at || ''}
-                                                    >
-                                                        {lastFetched.text}
-                                                    </span>
-                                                );
-                                            })()}
-                                        </td>
-
-                                        <td className="p-3">
-                                            <Select
-                                                value={company.status}
-                                                onValueChange={(value) => handleStatusChange(company.id, value)}
-                                            >
-                                                <SelectTrigger className="h-7 w-20 text-xs rounded-lg border-0 p-0 focus:ring-0">
-                                                    {getStatusBadge(company.status)}
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="new">新規</SelectItem>
-                                                    <SelectItem value="promising">見込み</SelectItem>
-                                                    <SelectItem value="meeting">商談中</SelectItem>
-                                                    <SelectItem value="won">成約</SelectItem>
-                                                    <SelectItem value="ng">NG</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                </div>
-
-                {companies.length === 0 ? (
-                    <div className="text-center py-16">
-                        <Building2 className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-                        <p className="text-muted-foreground">データがありません</p>
-                        <p className="text-sm text-muted-foreground mt-1">検索ページからスクレイピングを開始してください</p>
-                    </div>
-                ) : filteredCompanies.length === 0 ? (
-                    <div className="text-center py-16">
-                        <Filter className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-                        <p className="text-muted-foreground">条件に一致するデータがありません</p>
-                        <p className="text-sm text-muted-foreground mt-1">フィルターを変更してください</p>
-                    </div>
-                ) : null}
-            </Card>
+            <CompanyTable
+                companies={companies}
+                filteredCompanies={filteredCompanies}
+                selectedRows={selectedRows}
+                sortColumn={sortColumn}
+                sortDirection={sortDirection}
+                columnFilters={columnFilters}
+                onToggleRow={toggleRowSelection}
+                onToggleAll={toggleAllSelection}
+                onSort={handleSort}
+                onColumnFilterChange={handleColumnFilterChange}
+                onViewDetail={handleViewDetail}
+                onStatusChange={handleStatusChange}
+            />
 
             {/* Delete Confirmation Dialog */}
-            <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-                <DialogContent className="rounded-2xl">
-                    <DialogHeader>
-                        <DialogTitle>削除の確認</DialogTitle>
-                        <DialogDescription>
-                            選択した {selectedRows.size} 件の企業データを削除しますか？
-                            この操作は取り消せません。
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="flex justify-end gap-3 mt-6">
-                        <Button
-                            variant="outline"
-                            className="rounded-xl"
-                            onClick={() => setShowDeleteConfirm(false)}
-                            disabled={isDeleting}
-                        >
-                            キャンセル
-                        </Button>
-                        <Button
-                            variant="destructive"
-                            className="rounded-xl"
-                            onClick={handleDelete}
-                            disabled={isDeleting}
-                        >
-                            {isDeleting ? (
-                                <>
-                                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                                    削除中...
-                                </>
-                            ) : (
-                                '削除する'
-                            )}
-                        </Button>
-                    </div>
-                </DialogContent>
-            </Dialog>
+            <DeleteConfirmDialog
+                isOpen={showDeleteConfirm}
+                onClose={() => setShowDeleteConfirm(false)}
+                selectedCount={selectedRows.size}
+                isDeleting={isDeleting}
+                onDelete={handleDelete}
+            />
 
             {/* Update Results Dialog */}
-            <Dialog open={showUpdateResults} onOpenChange={setShowUpdateResults}>
-                <DialogContent className="rounded-2xl max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
-                    <DialogHeader>
-                        <DialogTitle>更新結果</DialogTitle>
-                        <DialogDescription>
-                            {lastUpdateResults?.length || 0} 件の企業データを更新しました
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="flex-1 overflow-y-auto mt-4 space-y-3">
-                        {lastUpdateResults?.filter(r =>
-                            r.changes.rank || r.changes.jobCount || r.changes.status
-                        ).map((result) => (
-                            <div
-                                key={result.companyId}
-                                className={cn(
-                                    'p-3 rounded-xl border',
-                                    result.error
-                                        ? 'bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800'
-                                        : 'bg-muted/50 border-border'
-                                )}
-                            >
-                                <div className="font-medium">{result.companyName}</div>
-                                {result.error ? (
-                                    <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                                        エラー: {result.error}
-                                    </p>
-                                ) : (
-                                    <div className="flex flex-wrap gap-2 mt-2">
-                                        {result.changes.rank && (
-                                            <Badge
-                                                className={cn(
-                                                    'text-xs',
-                                                    result.changes.rank.direction === 'upgrade'
-                                                        ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
-                                                        : 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300'
-                                                )}
-                                            >
-                                                ランク: {result.changes.rank.old || '-'} → {result.changes.rank.new || '-'}
-                                                {result.changes.rank.direction === 'upgrade' ? ' ↑' : ' ↓'}
-                                            </Badge>
-                                        )}
-                                        {result.changes.jobCount && (
-                                            <Badge
-                                                className={cn(
-                                                    'text-xs',
-                                                    result.changes.jobCount.delta > 0
-                                                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
-                                                        : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                                                )}
-                                            >
-                                                求人数: {result.changes.jobCount.old} → {result.changes.jobCount.new}
-                                                {result.changes.jobCount.delta > 0 ? ` (+${result.changes.jobCount.delta})` : ` (${result.changes.jobCount.delta})`}
-                                            </Badge>
-                                        )}
-                                        {result.changes.status && (
-                                            <Badge
-                                                className={cn(
-                                                    'text-xs',
-                                                    result.changes.status.new === '掲載終了'
-                                                        ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
-                                                        : 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
-                                                )}
-                                            >
-                                                {result.changes.status.old} → {result.changes.status.new}
-                                            </Badge>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-                        {lastUpdateResults?.filter(r =>
-                            r.changes.rank || r.changes.jobCount || r.changes.status
-                        ).length === 0 && (
-                            <div className="text-center py-8 text-muted-foreground">
-                                変更のあった企業はありませんでした
-                            </div>
-                        )}
-                    </div>
-                    <div className="flex justify-end mt-4 pt-4 border-t">
-                        <Button
-                            className="rounded-xl"
-                            onClick={() => setShowUpdateResults(false)}
-                        >
-                            閉じる
-                        </Button>
-                    </div>
-                </DialogContent>
-            </Dialog>
+            <UpdateResultsDialog
+                isOpen={showUpdateResults}
+                onClose={() => setShowUpdateResults(false)}
+                results={lastUpdateResults}
+            />
 
             {/* Detail Slide Panel */}
-            <div
-                ref={detailPanelRef}
-                className={cn(
-                    'fixed right-0 bottom-0 h-1/2 bg-background border-t border-border shadow-2xl transition-all duration-300 ease-out z-40',
-                    isDetailOpen ? 'translate-y-0' : 'translate-y-full',
-                    sidebarCollapsed ? 'left-0' : 'left-64'
-                )}
-            >
-                {/* Panel Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b bg-muted/30">
-                    <div>
-                        <h3 className="text-lg font-semibold">{detailCompany?.company_name}</h3>
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            {detailCompany && getSourceBadge(detailCompany.source)} からスクレイピング
-                        </div>
-                    </div>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="rounded-xl"
-                        onClick={() => setIsDetailOpen(false)}
-                    >
-                        <X className="h-5 w-5" />
-                    </Button>
-                </div>
-
-                {/* Panel Content */}
-                {detailCompany && (
-                    <div className="overflow-y-auto h-[calc(100%-73px)] p-6">
-                        <div className="grid grid-cols-2 gap-6">
-                            {/* Left Column */}
-                            <div className="space-y-4">
-                                {/* 基本情報 */}
-                                <section className="p-4 rounded-xl bg-muted/50">
-                                    <h4 className="font-semibold mb-3 flex items-center gap-2">
-                                        <Building2 className="h-4 w-4" />
-                                        基本情報
-                                    </h4>
-                                    <dl className="grid grid-cols-2 gap-2 text-sm">
-                                        <dt className="text-muted-foreground">代表者</dt>
-                                        <dd>{detailCompany.representative || '-'}</dd>
-                                        <dt className="text-muted-foreground">設立</dt>
-                                        <dd>{detailCompany.establishment || '-'}</dd>
-                                        <dt className="text-muted-foreground">従業員数</dt>
-                                        <dd>{detailCompany.employees || '-'}</dd>
-                                        <dt className="text-muted-foreground">売上高</dt>
-                                        <dd>{detailCompany.revenue || '-'}</dd>
-                                        <dt className="text-muted-foreground">所在地</dt>
-                                        <dd>{detailCompany.address || '-'}</dd>
-                                    </dl>
-                                </section>
-
-                                {/* 事業内容 */}
-                                <section className="p-4 rounded-xl bg-muted/50">
-                                    <h4 className="font-semibold mb-3 flex items-center gap-2">
-                                        <Briefcase className="h-4 w-4" />
-                                        事業内容
-                                    </h4>
-                                    <p className="text-sm whitespace-pre-wrap">{detailCompany.industry || '-'}</p>
-                                </section>
-                            </div>
-
-                            {/* Right Column */}
-                            <div className="space-y-4">
-                                {/* 採用情報 */}
-                                <section className="p-4 rounded-xl bg-muted/50">
-                                    <h4 className="font-semibold mb-3">採用情報</h4>
-                                    <dl className="grid grid-cols-2 gap-2 text-sm">
-                                        <dt className="text-muted-foreground">職種</dt>
-                                        <dd>{detailCompany.job_title || '-'}</dd>
-                                        <dt className="text-muted-foreground">給与</dt>
-                                        <dd className="whitespace-pre-wrap">{detailCompany.salary_text || '-'}</dd>
-                                    </dl>
-                                </section>
-
-                                {/* リンク */}
-                                <section className="p-4 rounded-xl bg-muted/50">
-                                    <h4 className="font-semibold mb-3">リンク</h4>
-                                    <div className="flex flex-wrap gap-2">
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="rounded-xl"
-                                            onClick={() => window.open(detailCompany.url, '_blank')}
-                                        >
-                                            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-                                            求人ページ
-                                        </Button>
-                                        {detailCompany.homepage_url && (
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                className="rounded-xl"
-                                                onClick={() => window.open(detailCompany.homepage_url!, '_blank')}
-                                            >
-                                                <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-                                                企業HP
-                                            </Button>
-                                        )}
-                                        {detailCompany.contact_form_url && (
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                className="rounded-xl"
-                                                onClick={() => window.open(detailCompany.contact_form_url!, '_blank')}
-                                            >
-                                                <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-                                                問い合わせ
-                                            </Button>
-                                        )}
-                                    </div>
-                                </section>
-
-                                {/* メモ */}
-                                <section className="p-4 rounded-xl bg-muted/50">
-                                    <h4 className="font-semibold mb-3">メモ</h4>
-                                    <textarea
-                                        className="w-full p-3 border rounded-xl text-sm min-h-[80px] bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary"
-                                        placeholder="メモを入力..."
-                                        defaultValue={detailCompany.note || ''}
-                                        onBlur={(e) => updateCompany(detailCompany.id, { note: e.target.value })}
-                                    />
-                                </section>
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </div>
+            <CompanyDetailPanel
+                isOpen={isDetailOpen}
+                company={detailCompany}
+                sidebarCollapsed={sidebarCollapsed}
+                onClose={() => setIsDetailOpen(false)}
+                onUpdateNote={handleUpdateNote}
+                panelRef={detailPanelRef}
+            />
         </div>
     );
 }

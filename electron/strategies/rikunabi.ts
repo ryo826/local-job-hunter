@@ -1,11 +1,14 @@
 import { Page, Locator } from 'playwright';
 import { ScrapingStrategy, CompanyData, ScrapingParams, ScrapingCallbacks, BudgetRank, JobCardInfo } from './ScrapingStrategy';
 import { normalizeIndustry, normalizeArea, normalizeSalary, normalizeEmployees } from '../utils/data-normalizer';
-
-// ランダム待機時間のヘルパー関数
-function randomDelay(min: number, max: number): number {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-}
+import {
+    randomDelay,
+    loadPageWithRetry,
+    extractTotalCount,
+    normalizeAddress as normalizeAddressUtil,
+    cleanCompanyName as cleanCompanyNameUtil,
+    extractPrefectureFromAddress,
+} from '../utils/scraping-utils';
 
 // ランク判定結果
 interface RankResult {
@@ -48,24 +51,45 @@ async function extractRikunabiJobDate(page: Page): Promise<Date | null> {
 }
 
 // リクナビNEXTのランク判定ロジック
-// isJobFlairフラグ > ページ内表示順序
-// リクナビは100件/ページ表示
+// 実際のHTML調査結果に基づく判定:
+// - "premium" クラス: 最上位プラン → A級 (7件検出)
+// - "flair" クラス (Job Flair): 有料オプション → A級 (100回出現)
+// - 「積極採用中」ラベル: 有料プラン → A級
+// - それ以外: 通常プラン → B〜C級（ページ位置で判定）
 async function classifyRikunabi(card: Locator, displayIndex: number, pageNum: number): Promise<RankResult> {
     try {
-        // 1. isJobFlairフラグの検出を試みる
-        // Job Flairオプションはカードにプレミアムなスタイリングが適用される
-        // 通常、特別なクラス名やdata属性で判別可能
-        const hasJobFlair = await card.locator('[class*="flair"], [class*="premium"], [class*="sponsored"]').count() > 0;
+        // 1. "premium" クラスの検出（最上位プラン）
+        const hasPremium = await card.locator('[class*="premium"]').count() > 0;
+        if (hasPremium) {
+            return { rank: 'A', confidence: 0.95 };  // プレミアム（最上位）
+        }
 
-        // 絶対インデックスを計算（100件/ページ）
+        // 2. "flair" クラスの検出（Job Flair有料オプション）
+        const hasFlair = await card.locator('[class*="flair"]').count() > 0;
+        if (hasFlair) {
+            return { rank: 'A', confidence: 0.9 };  // Job Flair付き
+        }
+
+        // 3. 「積極採用中」ラベルの検出
+        const hasActiveLabel = await card.locator('text=積極採用中').count() > 0;
+        if (hasActiveLabel) {
+            return { rank: 'A', confidence: 0.85 };  // 積極採用中ラベル
+        }
+
+        // 4. sponsored クラスの検出（スポンサー枠）
+        const hasSponsored = await card.locator('[class*="sponsored"]').count() > 0;
+        if (hasSponsored) {
+            return { rank: 'A', confidence: 0.85 };  // スポンサー枠
+        }
+
+        // 5. ページ位置による判定（通常プラン）
         const absoluteIndex = (pageNum - 1) * 100 + displayIndex;
-
-        if (hasJobFlair) {
-            return { rank: 'A', confidence: 0.9 };  // Job Flairオプション付き
+        if (absoluteIndex < 50) {
+            return { rank: 'B', confidence: 0.7 };  // 1ページ目上位50件
         } else if (absoluteIndex < 100) {
-            return { rank: 'B', confidence: 0.7 };  // 1ページ目(100件以内)
+            return { rank: 'B', confidence: 0.6 };  // 1ページ目下位
         } else {
-            return { rank: 'C', confidence: 0.6 };  // 2ページ目以降
+            return { rank: 'C', confidence: 0.5 };  // 2ページ目以降
         }
     } catch (error) {
         console.warn(`Rank classification failed: ${error}`);
@@ -125,55 +149,58 @@ const prefectureCodes: Record<string, string> = {
     '沖縄県': 'okinawa',
 };
 
-// リクナビNEXT職種カテゴリマッピング（英語名）
-// URL形式: /oc-{英語名}/
+// リクナビNEXT職種カテゴリマッピング（URLコード）
+// URL形式: /oc-{コード}/
+// 実際のURL例: https://next.rikunabi.com/job_search/area-tokyo/oc-sales/sal-over500/
+// 職種一覧（name属性）:
+// 1:営業・販売, 2:経営・事業企画・人事・事務, 3:IT・Web・ゲームエンジニア,
+// 4:メディア・クリエイター, 5:エンジニアリング・設計開発, 6:製造・工場,
+// 7:マーケティング・広告・宣伝, 8:飲食・フードサービス, 9:旅行・レジャー・イベント,
+// 10:ビューティー・生活サービス, 11:倉庫・物流管理, 12:ドライバー・配送スタッフ,
+// 13:整備・修理, 14:清掃・美化, 15:警備・保安, 16:建設・土木・施工,
+// 17:金融・財務・会計, 18:法務・法律, 19:研究, 20:医療・看護師・薬剤師,
+// 21:介護・福祉, 22:保育士・教員・講師, 23:農林漁業
 const jobTypeCodes: Record<string, string> = {
-    // サイト固有の名称
-    '営業': 'selling',
-    '企画/マーケティング': 'promotion',
-    'コーポレートスタッフ': 'corporatestaff',
-    'SCM/生産管理/購買/物流': 'scm',
-    '事務/受付/秘書/翻訳': 'administration',
-    '小売販売/流通': 'retail',
-    'サービス/接客': 'hospitality',
-    '飲食': 'foodservice',
-    'コンサル/士業/リサーチャー': 'consulting',
-    'IT・Web・ゲームエンジニア': 'it',
-    'クリエイティブ/デザイン職': 'design',
-    '建築/土木/プラント専門職': 'building',
-    '不動産専門職': 'realestate',
-    '機械/電気/電子製品専門職': 'electronic',
-    '化学/素材専門職': 'chemicals',
-    '化粧品/日用品/アパレル専門職': 'consumergoods',
-    '医薬品専門職': 'pharmaceuticals',
-    '医療機器/理化学機器専門職': 'medicaldevices',
-    '医療/福祉専門職': 'medical',
-    '金融専門職': 'financial',
-    '食品/香料/飼料専門職': 'culinary',
-    '出版/メディア/エンタメ専門職': 'broadcasting',
-    'インフラ専門職': 'infrastructure',
-    '交通/運輸/物流専門職': 'transportation',
-    '人材サービス専門職': 'recruitment',
-    '教育/保育専門職': 'instruction',
-    'エグゼクティブ': 'executive',
-    '学術研究': 'analysis',
-    '公務員/団体職員/農林水産': 'publicsector',
+    // リクナビNEXTのサイト固有職種名 → URLコード（実URL確認済み）
+    '営業・販売': 'sales',                          // 1 ✓
+    '経営・事業企画・人事・事務': 'management',     // 2 ✓
+    'IT・Web・ゲームエンジニア': 'it',              // 3 ✓
+    'メディア・クリエイター': 'media',              // 4 ✓
+    'エンジニアリング・設計開発': 'engineering',    // 5 ✓
+    '製造・工場': 'manufacturing',                  // 6 ✓
+    'マーケティング・広告・宣伝': 'marketing',      // 7 ✓
+    '飲食・フードサービス': 'food',                 // 8 ✓
+    '旅行・レジャー・イベント': 'tourism',          // 9 ✓
+    'ビューティー・生活サービス': 'beauty',         // 10 ✓
+    '倉庫・物流管理': 'logistics',                  // 11 ✓
+    'ドライバー・配送スタッフ': 'driver',           // 12 ✓
+    '整備・修理': 'maintenance',                    // 13 ✓
+    '清掃・美化': 'cleaning',                       // 14 ✓
+    '警備・保安': 'security',                       // 15 ✓
+    '建設・土木・施工': 'construction',             // 16 ✓
+    '金融・財務・会計': 'finance',                  // 17 ✓
+    '法務・法律': 'legal',                          // 18
+    '研究': 'research',                             // 19
+    '医療・看護師・薬剤師': 'medical',              // 20
+    '介護・福祉': 'welfare',                        // 21
+    '保育士・教員・講師': 'education',              // 22
+    '農林漁業': 'agriculture',                      // 23
     // 15統合カテゴリからのエイリアス
-    '営業・販売・カスタマー対応': 'selling',           // ① 営業・販売・カスタマーサポート
-    '企画・マーケティング・経営': 'promotion',         // ② 企画・マーケティング・経営
-    '事務・管理・アシスタント': 'administration',      // ③ 事務・管理
-    'ITエンジニア・Web・ゲーム': 'it',                 // ④ ITエンジニア（システム開発・インフラ）
-    '電気・電子・機械・半導体・制御': 'electronic',    // ⑤ 機械・電気・電子・半導体・制御
-    '化学・素材・食品・医薬': 'chemicals',             // ⑥ 化学・素材・食品・医薬
-    '建築・土木・設備・プラント・不動産技術': 'building', // ⑦ 建築・土木・設備・プラント
-    'クリエイティブ・デザイン': 'design',              // ⑧ クリエイティブ
-    'コンサルタント・専門職': 'consulting',            // ⑨ コンサルタント・専門職
-    '金融専門職': 'financial',                         // ⑩ 金融専門職
-    '医療・介護・福祉': 'medical',                     // ⑪ 医療・医薬・介護・福祉
-    '教育・保育・公共サービス': 'instruction',         // ⑫ 教育・保育・通訳
-    'サービス・外食・レジャー・美容・ホテル・交通': 'hospitality', // ⑬ サービス・外食・レジャー
-    '物流・運輸・技能工・設備・製造': 'transportation', // ⑭ 物流・運輸・設備／製造・技能工
-    '公務員・団体職員・その他': 'publicsector',        // ⑮ 公務員・団体職員・その他
+    '営業・販売・カスタマー対応': 'sales',                    // ① → 営業・販売
+    '企画・マーケティング・経営': 'management',               // ② → 経営・事業企画・人事・事務
+    '事務・管理・アシスタント': 'management',                 // ③ → 経営・事業企画・人事・事務
+    'ITエンジニア・Web・ゲーム': 'it',                        // ④ → IT・Web・ゲームエンジニア
+    '電気・電子・機械・半導体・制御': 'engineering',          // ⑤ → エンジニアリング・設計開発
+    '化学・素材・食品・医薬': 'research',                     // ⑥ → 研究
+    '建築・土木・設備・プラント・不動産技術': 'construction', // ⑦ → 建設・土木・施工
+    'クリエイティブ・デザイン': 'media',                      // ⑧ → メディア・クリエイター
+    'コンサルタント・専門職': 'management',                   // ⑨ → 経営・事業企画・人事・事務
+    '金融専門職': 'finance',                                  // ⑩ → 金融・財務・会計
+    '医療・介護・福祉': 'medical',                            // ⑪ → 医療・看護師・薬剤師
+    '教育・保育・公共サービス': 'education',                  // ⑫ → 保育士・教員・講師
+    'サービス・外食・レジャー・美容・ホテル・交通': 'tourism',// ⑬ → 旅行・レジャー・イベント
+    '物流・運輸・技能工・設備・製造': 'logistics',            // ⑭ → 倉庫・物流管理
+    '公務員・団体職員・その他': 'agriculture',                // ⑮ → 農林漁業（近いカテゴリ）
 };
 
 export class RikunabiStrategy implements ScrapingStrategy {
@@ -422,8 +449,8 @@ export class RikunabiStrategy implements ScrapingStrategy {
 
                     // データを統合
                     const address = companyInfo['本社所在地'] || jobDetails['勤務地'] || '';
-                    const normalizedAddress = this.normalizeAddress(address);
-                    const cleanName = this.cleanCompanyName(companyName);
+                    const normalizedAddress = normalizeAddressUtil(address);
+                    const cleanName = cleanCompanyNameUtil(companyName);
 
                     // 企業HPを複数のラベル名で検索（'企業ホームページ'を優先）
                     const homepageUrl = companyInfo['企業ホームページ'] || companyInfo['企業HP'] || companyInfo['ホームページ'] || companyInfo['HP'] || companyInfo['WEBサイト'] || companyInfo['Webサイト'] || companyInfo['公式サイト'] || '';
@@ -440,7 +467,7 @@ export class RikunabiStrategy implements ScrapingStrategy {
                         revenue: companyInfo['売上高'] || '',
                         phone: companyInfo['企業代表番号'] || '',
                         address: normalizedAddress,
-                        area: normalizeArea(this.extractAreaFromAddress(normalizedAddress)),
+                        area: normalizeArea(extractPrefectureFromAddress(normalizedAddress)),
                         homepage_url: homepageUrl,
                         industry: normalizeIndustry(companyInfo['事業内容']),
                         scrape_status: 'step1_completed',
@@ -689,93 +716,24 @@ export class RikunabiStrategy implements ScrapingStrategy {
         return info;
     }
 
-    // 住所の正規化
-    private normalizeAddress(address: string | undefined): string | undefined {
-        if (!address) return undefined;
-
-        // 郵便番号を除去
-        let normalized = address.replace(/〒?\d{3}-?\d{4}\s*/g, '').trim();
-        normalized = normalized.replace(/\s+/g, ' ').trim();
-
-        const prefectures = [
-            '北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県',
-            '茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県',
-            '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県',
-            '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県',
-            '奈良県', '和歌山県', '鳥取県', '島根県', '岡山県', '広島県', '山口県',
-            '徳島県', '香川県', '愛媛県', '高知県', '福岡県', '佐賀県', '長崎県',
-            '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県'
-        ];
-
-        for (const pref of prefectures) {
-            const idx = normalized.indexOf(pref);
-            if (idx !== -1) {
-                return normalized.substring(idx);
-            }
-        }
-
-        return normalized;
-    }
-
-    private cleanCompanyName(name: string): string {
-        let cleaned = name
-            // パイプ以降を削除
-            .split(/[|｜]/)[0]
-            // 【】内のプロモーション文を削除
-            .replace(/【プライム市場】|【スタンダード市場】|【グロース市場】|【東証一部】|【東証二部】|【TOKYO PRO Market上場】/g, '')
-            // グループ会社表記を削除
-            .replace(/\(.*グループ.*\)/g, '')
-            .replace(/（.*グループ.*）/g, '')
-            // 全角英数字を半角に変換
-            .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
-            // 全角スペースを半角に
-            .replace(/　/g, ' ')
-            // 余分な空白を整理
-            .replace(/\s+/g, ' ')
-            .trim();
-
-        return cleaned;
-    }
-
-    private extractAreaFromAddress(address: string | undefined): string {
-        if (!address) return '';
-
-        const prefectures = [
-            '北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県',
-            '茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県',
-            '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県',
-            '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県',
-            '奈良県', '和歌山県', '鳥取県', '島根県', '岡山県', '広島県', '山口県',
-            '徳島県', '香川県', '愛媛県', '高知県', '福岡県', '佐賀県', '長崎県',
-            '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県'
-        ];
-
-        for (const pref of prefectures) {
-            if (address.includes(pref)) {
-                return pref;
-            }
-        }
-
-        return '';
-    }
-
     // 検索URLを構築するヘルパーメソッド
-    // URL形式: https://next.rikunabi.com/job_search/area-{英語名}/oc-{職種英語名}/sal-over{年収}/
+    // URL形式: https://next.rikunabi.com/job_search/area-{勤務地}/oc-{職種}/sal-over{年収}/
+    // 例: https://next.rikunabi.com/job_search/area-tokyo/oc-sales/sal-over500/
     private buildSearchUrl(params: ScrapingParams): string {
         const { keywords, prefectures, jobTypes, minSalary } = params;
 
-        // パスベースのURL構築
+        // パスベースのURL構築（順序: area → oc → sal）
         let pathParts: string[] = [];
 
-        // 都道府県（最初の1つを使用）
+        // 勤務地フィルター（例: area-tokyo）
         if (prefectures && prefectures.length > 0) {
-            const areaCode = prefectureCodes[prefectures[0]];
-            if (areaCode) {
-                pathParts.push(`area-${areaCode}`);
+            const prefCode = prefectureCodes[prefectures[0]];
+            if (prefCode) {
+                pathParts.push(`area-${prefCode}`);
             }
         }
 
-        // 職種（最初の1つを使用）
+        // 職種フィルター（例: oc-sales）
         if (jobTypes && jobTypes.length > 0) {
             const jobCode = jobTypeCodes[jobTypes[0]];
             if (jobCode) {
@@ -921,8 +879,25 @@ export class RikunabiStrategy implements ScrapingStrategy {
                 }
             }
 
+            // ランクフィルターの設定
+            // Rikunabiのランク: A=有料オプション(上位に集中), B=1-50位, C=51位以降
+            const rankFilter = params.rankFilter;
+            const includeA = !rankFilter || rankFilter.length === 0 || rankFilter.includes('A');
+            const includeB = !rankFilter || rankFilter.length === 0 || rankFilter.includes('B');
+            const includeC = !rankFilter || rankFilter.length === 0 || rankFilter.includes('C');
+
+            // B/Cの境界位置（Aランクを除いた位置でカウント）
+            const B_MAX_POSITION = 50;  // Bランクは1-50位
+
+            if (rankFilter && rankFilter.length > 0) {
+                log(`ランクフィルター: ${rankFilter.join(', ')} (A=${includeA}, B=${includeB}, C=${includeC})`);
+            }
+
             let hasNext = true;
             let pageNum = 0;
+            let globalIndex = 0;  // 全体の表示順位
+            let nonAIndex = 0;    // Aランク以外の位置（B/Cの判定用）
+            let skippedA = 0;     // スキップしたAランク数
             const maxPages = 500;
 
             while (hasNext && pageNum < maxPages) {
@@ -944,6 +919,7 @@ export class RikunabiStrategy implements ScrapingStrategy {
 
                 if (jobCards.length === 0) break;
 
+                let shouldBreak = false;
                 for (let i = 0; i < jobCards.length; i++) {
                     try {
                         const card = jobCards[i];
@@ -952,10 +928,44 @@ export class RikunabiStrategy implements ScrapingStrategy {
 
                         const fullUrl = href.startsWith('http') ? href : `https://next.rikunabi.com${href}`;
 
-                        // ランク判定
-                        const hasJobFlair = await card.locator('[class*="flair"], [class*="premium"]').count() > 0;
-                        const absoluteIndex = (pageNum - 1) * 100 + i;
-                        const rank: BudgetRank = hasJobFlair ? 'A' : (absoluteIndex < 100 ? 'B' : 'C');
+                        // ランク判定（実際のHTML調査結果に基づく）
+                        const hasPremium = await card.locator('[class*="premium"]').count() > 0;
+                        const hasFlair = await card.locator('[class*="flair"]').count() > 0;
+                        const hasActiveLabel = await card.locator('text=積極採用中').count() > 0;
+                        const hasSponsored = await card.locator('[class*="sponsored"]').count() > 0;
+                        const isARank = hasPremium || hasFlair || hasActiveLabel || hasSponsored;
+
+                        let rank: BudgetRank;
+                        if (isARank) {
+                            rank = 'A';  // 有料オプション付き
+                            // Aランクを含まない場合はスキップ
+                            if (!includeA) {
+                                skippedA++;
+                                globalIndex++;
+                                continue;
+                            }
+                        } else {
+                            // Aランク以外の位置でB/Cを判定
+                            if (nonAIndex < B_MAX_POSITION) {
+                                rank = 'B';  // 1-50位
+                            } else {
+                                rank = 'C';  // 51位以降
+                            }
+                            nonAIndex++;
+
+                            // Cランクに達したが、Cを含まない場合は収集終了
+                            if (rank === 'C' && !includeC) {
+                                log(`Cランク位置に到達、Cランク未選択のため収集終了 (収集: ${allJobs.length}件, Aスキップ: ${skippedA}件)`);
+                                shouldBreak = true;
+                                break;
+                            }
+
+                            // Bランクだが、Bを含まない場合はスキップ
+                            if (rank === 'B' && !includeB) {
+                                globalIndex++;
+                                continue;
+                            }
+                        }
 
                         // 会社名を取得（カードから）
                         let companyName = '';
@@ -976,11 +986,20 @@ export class RikunabiStrategy implements ScrapingStrategy {
                             companyName,
                             jobTitle,
                             rank,
-                            displayIndex: absoluteIndex,
+                            displayIndex: globalIndex,
                         });
+
+                        globalIndex++;
                     } catch (err) {
                         // 個別エラーは無視
+                        globalIndex++;
                     }
+                }
+
+                // 収集終了フラグ
+                if (shouldBreak) {
+                    hasNext = false;
+                    break;
                 }
 
                 // 次のページへ
@@ -1002,6 +1021,9 @@ export class RikunabiStrategy implements ScrapingStrategy {
                 }
             }
 
+            if (skippedA > 0) {
+                log(`Aランク ${skippedA}件をスキップ`);
+            }
             log(`Collected ${allJobs.length} job URLs from ${pageNum} pages`);
             return allJobs;
 
@@ -1052,8 +1074,8 @@ export class RikunabiStrategy implements ScrapingStrategy {
             const companyInfo = await this.extractCompanyInfo(page, logFn);
 
             const address = companyInfo['本社所在地'] || jobDetails['勤務地'] || '';
-            const normalizedAddress = this.normalizeAddress(address);
-            const cleanName = this.cleanCompanyName(companyName);
+            const normalizedAddress = normalizeAddressUtil(address);
+            const cleanName = cleanCompanyNameUtil(companyName);
             const homepageUrl = companyInfo['企業ホームページ'] || companyInfo['企業HP'] || companyInfo['ホームページ'] || companyInfo['HP'] || '';
 
                 return {
@@ -1068,7 +1090,7 @@ export class RikunabiStrategy implements ScrapingStrategy {
                     revenue: companyInfo['売上高'] || '',
                     phone: companyInfo['企業代表番号'] || '',
                     address: normalizedAddress,
-                    area: normalizeArea(this.extractAreaFromAddress(normalizedAddress)),
+                    area: normalizeArea(extractPrefectureFromAddress(normalizedAddress)),
                     homepage_url: homepageUrl,
                     industry: normalizeIndustry(companyInfo['事業内容']),
                     scrape_status: 'step1_completed',

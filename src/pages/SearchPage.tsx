@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import {
     Select,
     SelectContent,
@@ -12,161 +10,45 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
-import { MapPin, Briefcase, ChevronRight, X, Play, Square, Clock, TrendingUp, CheckCircle2, Star, Users, Calendar, Banknote } from 'lucide-react';
+import { MapPin, Briefcase, ChevronRight, X, Play, Square, CheckCircle2, Star, Users, Calendar, Banknote } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { cn } from '@/lib/utils';
-import type { BudgetRank } from '@/types';
-
-// ランク選択オプション
-const rankOptions: { rank: BudgetRank; label: string; icon: string; color: string }[] = [
-    { rank: 'A', label: '高予算層 (プレミアム枠)', icon: '⭐', color: 'bg-amber-100 dark:bg-amber-900 border-amber-300 dark:border-amber-700' },
-    { rank: 'B', label: '中予算層 (1ページ目)', icon: '🔵', color: 'bg-blue-100 dark:bg-blue-900 border-blue-300 dark:border-blue-700' },
-    { rank: 'C', label: '低予算層 (2ページ目以降)', icon: '⚪', color: 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-600' },
-];
-
-// 地方と都道府県のマッピング
-const regionPrefectures: Record<string, string[]> = {
-    '北海道': ['北海道'],
-    '東北': ['青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県'],
-    '関東': ['茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県'],
-    '甲信越': ['新潟県', '山梨県', '長野県'],
-    '北陸': ['富山県', '石川県', '福井県'],
-    '東海': ['岐阜県', '静岡県', '愛知県', '三重県'],
-    '関西': ['滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県'],
-    '中国': ['鳥取県', '島根県', '岡山県', '広島県', '山口県'],
-    '四国': ['徳島県', '香川県', '愛媛県', '高知県'],
-    '九州・沖縄': ['福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県'],
-};
-
-const regions = Object.keys(regionPrefectures);
-
-// 職種カテゴリ（15統合カテゴリ）
-const jobTypeCategories = [
-    { id: 'sales', name: '営業・販売・カスタマー対応', icon: '💼' },
-    { id: 'planning', name: '企画・マーケティング・経営', icon: '📊' },
-    { id: 'office', name: '事務・管理・アシスタント', icon: '📝' },
-    { id: 'it', name: 'ITエンジニア・Web・ゲーム', icon: '💻' },
-    { id: 'electric', name: '電気・電子・機械・半導体・制御', icon: '⚡' },
-    { id: 'chemical', name: '化学・素材・食品・医薬', icon: '🧪' },
-    { id: 'construction', name: '建築・土木・設備・プラント・不動産技術', icon: '🏗️' },
-    { id: 'creative', name: 'クリエイティブ・デザイン', icon: '🎨' },
-    { id: 'consulting', name: 'コンサルタント・専門職', icon: '📈' },
-    { id: 'finance', name: '金融専門職', icon: '💰' },
-    { id: 'medical', name: '医療・介護・福祉', icon: '🏥' },
-    { id: 'education', name: '教育・保育・公共サービス', icon: '📚' },
-    { id: 'service', name: 'サービス・外食・レジャー・美容・ホテル・交通', icon: '🛎️' },
-    { id: 'logistics', name: '物流・運輸・技能工・設備・製造', icon: '🚚' },
-    { id: 'public', name: '公務員・団体職員・その他', icon: '🏛️' },
-];
-
-// 給与フィルターオプション
-const salaryOptions = [
-    { value: 'all', label: '指定なし' },
-    { value: '300', label: '300万円以上' },
-    { value: '400', label: '400万円以上' },
-    { value: '500', label: '500万円以上' },
-    { value: '600', label: '600万円以上' },
-    { value: '700', label: '700万円以上' },
-    { value: '800', label: '800万円以上' },
-    { value: '1000', label: '1,000万円以上' },
-];
-
-// 企業規模フィルターオプション（範囲指定）
-const employeeOptions = [
-    { value: 'all', label: '指定なし' },
-    { value: '0-10', label: '0〜10人' },
-    { value: '10-50', label: '10〜50人' },
-    { value: '50-100', label: '50〜100人' },
-    { value: '100-300', label: '100〜300人' },
-    { value: '300-500', label: '300〜500人' },
-    { value: '500-1000', label: '500〜1,000人' },
-    { value: '1000-', label: '1,000人以上' },
-];
-
-// 求人更新日フィルターオプション
-const jobUpdatedOptions = [
-    { value: 'all', label: '指定なし' },
-    { value: '3', label: '3日以内' },
-    { value: '7', label: '1週間以内' },
-    { value: '14', label: '2週間以内' },
-    { value: '30', label: '1ヶ月以内' },
-];
-
-// サイト情報
-const siteInfo = {
-    mynavi: {
-        name: 'マイナビ転職',
-        color: 'bg-sky-500',
-        lightBg: 'bg-sky-50 dark:bg-sky-950',
-        border: 'border-sky-200 dark:border-sky-800',
-        text: 'text-sky-700 dark:text-sky-300',
-        selectedBg: 'bg-sky-100 dark:bg-sky-900',
-        selectedBorder: 'border-sky-500',
-    },
-    rikunabi: {
-        name: 'リクナビNEXT',
-        color: 'bg-emerald-500',
-        lightBg: 'bg-emerald-50 dark:bg-emerald-950',
-        border: 'border-emerald-200 dark:border-emerald-800',
-        text: 'text-emerald-700 dark:text-emerald-300',
-        selectedBg: 'bg-emerald-100 dark:bg-emerald-900',
-        selectedBorder: 'border-emerald-500',
-    },
-    doda: {
-        name: 'doda',
-        color: 'bg-orange-500',
-        lightBg: 'bg-orange-50 dark:bg-orange-950',
-        border: 'border-orange-200 dark:border-orange-800',
-        text: 'text-orange-700 dark:text-orange-300',
-        selectedBg: 'bg-orange-100 dark:bg-orange-900',
-        selectedBorder: 'border-orange-500',
-    },
-};
+import type { SiteKey } from './components/search/constants';
+import {
+    rankOptions,
+    jobTypeCategories,
+    salaryOptions,
+    employeeOptions,
+    jobUpdatedOptions,
+    siteInfo,
+} from './components/search/constants';
+import { useSearchFilters } from './components/search/useSearchFilters';
+import { LocationModal } from './components/search/LocationModal';
+import { JobTypeModal } from './components/search/JobTypeModal';
+import { ProgressPanel } from './components/search/ProgressPanel';
 
 export function SearchPage() {
-    const { isScrapingRunning, scrapingProgress, scrapingSettings, startScraping, stopScraping, setScrapingSettings } = useAppStore();
+    const { isScrapingRunning, scrapingProgress, startScraping, stopScraping, setScrapingSettings } = useAppStore();
 
-    const [selectedSites, setSelectedSites] = useState({
-        mynavi: true,
-        rikunabi: true,
-        doda: true,
-    });
+    const {
+        state,
+        toggleSite,
+        togglePrefecture,
+        toggleRegion,
+        toggleJobType,
+        toggleRank,
+        setSalaryFilter,
+        setEmployeesFilter,
+        setJobUpdatedFilter,
+        clearPrefectures,
+        clearJobTypes,
+        getLocationSummary,
+        getJobTypeSummary,
+        selectedSiteCount,
+    } = useSearchFilters();
 
-    // 勤務地選択
-    const [selectedPrefectures, setSelectedPrefectures] = useState<Set<string>>(new Set());
     const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
-    const [activeRegion, setActiveRegion] = useState('関東');
-
-    // 職種選択
-    const [selectedJobTypes, setSelectedJobTypes] = useState<Set<string>>(new Set());
     const [isJobTypeModalOpen, setIsJobTypeModalOpen] = useState(false);
-
-    // ランクフィルター（チェックされたランクのみ保存）
-    const [selectedRanks, setSelectedRanks] = useState<Set<BudgetRank>>(new Set(['A', 'B', 'C']));
-
-    // 追加フィルター
-    const [salaryFilter, setSalaryFilter] = useState('all');
-    const [employeesFilter, setEmployeesFilter] = useState('all');
-    const [jobUpdatedFilter, setJobUpdatedFilter] = useState('all');
-
-    // スクレイピング実行中の設定を復元
-    useEffect(() => {
-        if (isScrapingRunning && scrapingSettings) {
-            setSelectedSites(scrapingSettings.selectedSites);
-            setSelectedPrefectures(new Set(scrapingSettings.selectedPrefectures));
-            setSelectedJobTypes(new Set(scrapingSettings.selectedJobTypes));
-            setSelectedRanks(new Set(scrapingSettings.selectedRanks));
-            setSalaryFilter(scrapingSettings.salaryFilter);
-            setEmployeesFilter(scrapingSettings.employeesFilter);
-            setJobUpdatedFilter(scrapingSettings.jobUpdatedFilter);
-        }
-    }, []);
 
     // Listen for scraper logs and output to console
     useEffect(() => {
@@ -181,94 +63,8 @@ export function SearchPage() {
         };
     }, []);
 
-    const handleSiteChange = (site: keyof typeof selectedSites) => {
-        setSelectedSites((prev) => ({
-            ...prev,
-            [site]: !prev[site],
-        }));
-    };
-
-    // 都道府県の選択/解除
-    const togglePrefecture = (prefecture: string) => {
-        setSelectedPrefectures(prev => {
-            const newSet = new Set(prev);
-            if (newSet.has(prefecture)) {
-                newSet.delete(prefecture);
-            } else {
-                newSet.add(prefecture);
-            }
-            return newSet;
-        });
-    };
-
-    // 地方全体の選択/解除
-    const toggleRegion = (region: string) => {
-        const prefectures = regionPrefectures[region];
-        const allSelected = prefectures.every(p => selectedPrefectures.has(p));
-
-        setSelectedPrefectures(prev => {
-            const newSet = new Set(prev);
-            if (allSelected) {
-                prefectures.forEach(p => newSet.delete(p));
-            } else {
-                prefectures.forEach(p => newSet.add(p));
-            }
-            return newSet;
-        });
-    };
-
-    // 職種の選択/解除
-    const toggleJobType = (jobTypeId: string) => {
-        setSelectedJobTypes(prev => {
-            const newSet = new Set(prev);
-            if (newSet.has(jobTypeId)) {
-                newSet.delete(jobTypeId);
-            } else {
-                newSet.add(jobTypeId);
-            }
-            return newSet;
-        });
-    };
-
-    // ランクの選択/解除
-    const toggleRank = (rank: BudgetRank) => {
-        setSelectedRanks(prev => {
-            const newSet = new Set(prev);
-            if (newSet.has(rank)) {
-                // 最低1つは選択されている必要がある
-                if (newSet.size > 1) {
-                    newSet.delete(rank);
-                }
-            } else {
-                newSet.add(rank);
-            }
-            return newSet;
-        });
-    };
-
-    // 選択された都道府県のサマリー
-    const getLocationSummary = () => {
-        if (selectedPrefectures.size === 0) return '選択してください';
-        if (selectedPrefectures.size <= 3) {
-            return Array.from(selectedPrefectures).join(', ');
-        }
-        return `${Array.from(selectedPrefectures).slice(0, 2).join(', ')} 他${selectedPrefectures.size - 2}件`;
-    };
-
-    // 選択された職種のサマリー
-    const getJobTypeSummary = () => {
-        if (selectedJobTypes.size === 0) return '選択してください';
-        const selectedNames = jobTypeCategories
-            .filter(cat => selectedJobTypes.has(cat.id))
-            .map(cat => cat.name);
-        if (selectedNames.length <= 2) {
-            return selectedNames.join(', ');
-        }
-        return `${selectedNames.slice(0, 2).join(', ')} 他${selectedNames.length - 2}件`;
-    };
-
     const handleStartScraping = async () => {
-        const sources = Object.entries(selectedSites)
+        const sources = Object.entries(state.selectedSites)
             .filter(([, enabled]) => enabled)
             .map(([source]) => source);
 
@@ -279,38 +75,29 @@ export function SearchPage() {
 
         // 選択された職種名を取得
         const selectedJobTypeNames = jobTypeCategories
-            .filter(cat => selectedJobTypes.has(cat.id))
+            .filter(cat => state.selectedJobTypes.has(cat.id))
             .map(cat => cat.name);
 
         // 設定を保存（ページ移動時に復元するため）
         setScrapingSettings({
-            selectedSites,
-            selectedPrefectures: Array.from(selectedPrefectures),
-            selectedJobTypes: Array.from(selectedJobTypes),
-            selectedRanks: Array.from(selectedRanks),
-            salaryFilter,
-            employeesFilter,
-            jobUpdatedFilter,
+            selectedSites: state.selectedSites,
+            selectedPrefectures: Array.from(state.selectedPrefectures),
+            selectedJobTypes: Array.from(state.selectedJobTypes),
+            selectedRanks: Array.from(state.selectedRanks),
+            salaryFilter: state.salaryFilter,
+            employeesFilter: state.employeesFilter,
+            jobUpdatedFilter: state.jobUpdatedFilter,
         });
 
         await startScraping({
             sources,
-            prefectures: selectedPrefectures.size > 0 ? Array.from(selectedPrefectures) : undefined,
+            prefectures: state.selectedPrefectures.size > 0 ? Array.from(state.selectedPrefectures) : undefined,
             jobTypes: selectedJobTypeNames.length > 0 ? selectedJobTypeNames : undefined,
-            // 全て選択されている場合はフィルターなし、一部のみの場合は選択されたランクのみ
-            rankFilter: selectedRanks.size < 3 ? Array.from(selectedRanks) : undefined,
-            // 追加フィルター
-            minSalary: salaryFilter !== 'all' ? parseInt(salaryFilter) : undefined,
-            employeeRange: employeesFilter !== 'all' ? employeesFilter : undefined,
-            maxJobUpdatedDays: jobUpdatedFilter !== 'all' ? parseInt(jobUpdatedFilter) : undefined,
+            rankFilter: state.selectedRanks.size < 3 ? Array.from(state.selectedRanks) : undefined,
+            minSalary: state.salaryFilter !== 'all' ? parseInt(state.salaryFilter) : undefined,
+            employeeRange: state.employeesFilter !== 'all' ? state.employeesFilter : undefined,
         });
     };
-
-    const progressPercentage = scrapingProgress
-        ? Math.min(100, (scrapingProgress.current / Math.max(scrapingProgress.total, 1)) * 100)
-        : 0;
-
-    const selectedSiteCount = Object.values(selectedSites).filter(Boolean).length;
 
     return (
         <div className="max-w-3xl mx-auto space-y-6">
@@ -321,67 +108,7 @@ export function SearchPage() {
 
             {/* Progress Panel - Show when running */}
             {isScrapingRunning && scrapingProgress && (
-                <Card className="p-6 rounded-2xl border-2 border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                            <h2 className="text-lg font-semibold flex items-center gap-2">
-                                <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-                                実行中...
-                            </h2>
-                            <Badge variant="secondary" className="rounded-xl">
-                                {scrapingProgress.source}
-                            </Badge>
-                        </div>
-
-                        {/* 総件数 */}
-                        {scrapingProgress.totalJobs !== undefined && (
-                            <div className="flex items-center gap-3 p-4 rounded-xl bg-card border">
-                                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                                    <TrendingUp className="h-5 w-5 text-primary" />
-                                </div>
-                                <div>
-                                    <p className="text-sm text-muted-foreground">検索結果</p>
-                                    <p className="text-2xl font-bold">{scrapingProgress.totalJobs.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">件</span></p>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* 経過時間 */}
-                        <ElapsedTime startTime={scrapingProgress.startTime} estimatedMinutes={scrapingProgress.estimatedMinutes} />
-
-                        {/* Progress Bar */}
-                        <div>
-                            <div className="mb-2 flex items-center justify-between text-sm">
-                                <span className="text-muted-foreground">進捗</span>
-                                <span className="font-semibold">
-                                    {scrapingProgress.current} / {scrapingProgress.totalJobs ?? '?'} 件
-                                </span>
-                            </div>
-                            <Progress value={progressPercentage} className="h-3 rounded-xl" />
-                        </div>
-
-                        {/* Stats */}
-                        <div className="grid grid-cols-3 gap-3">
-                            <div className="p-3 rounded-xl bg-card border text-center">
-                                <p className="text-2xl font-bold text-foreground">{scrapingProgress.current}</p>
-                                <p className="text-xs text-muted-foreground">処理済</p>
-                            </div>
-                            <div className="p-3 rounded-xl bg-card border text-center">
-                                <p className="text-2xl font-bold text-green-600">{scrapingProgress.newCount}</p>
-                                <p className="text-xs text-muted-foreground">新規</p>
-                            </div>
-                            <div className="p-3 rounded-xl bg-card border text-center">
-                                <p className="text-2xl font-bold text-muted-foreground">{scrapingProgress.duplicateCount}</p>
-                                <p className="text-xs text-muted-foreground">重複</p>
-                            </div>
-                        </div>
-
-                        {/* Status */}
-                        <div className="text-sm text-muted-foreground text-center">
-                            {scrapingProgress.status}
-                        </div>
-                    </div>
-                </Card>
+                <ProgressPanel progress={scrapingProgress} />
             )}
 
             {/* Target Sites */}
@@ -391,13 +118,13 @@ export function SearchPage() {
                     <span className="text-sm text-muted-foreground">{selectedSiteCount} サイト選択中</span>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
-                    {(Object.keys(siteInfo) as Array<keyof typeof siteInfo>).map((site) => {
+                    {(Object.keys(siteInfo) as SiteKey[]).map((site) => {
                         const info = siteInfo[site];
-                        const isSelected = selectedSites[site];
+                        const isSelected = state.selectedSites[site];
                         return (
                             <button
                                 key={site}
-                                onClick={() => handleSiteChange(site)}
+                                onClick={() => toggleSite(site)}
                                 disabled={isScrapingRunning}
                                 className={cn(
                                     'relative p-4 rounded-xl border-2 transition-all',
@@ -440,7 +167,7 @@ export function SearchPage() {
                             variant="outline"
                             className={cn(
                                 'w-full h-12 rounded-xl justify-between',
-                                selectedPrefectures.size > 0 && 'border-primary bg-primary/5'
+                                state.selectedPrefectures.size > 0 && 'border-primary bg-primary/5'
                             )}
                             onClick={() => setIsLocationModalOpen(true)}
                             disabled={isScrapingRunning}
@@ -451,16 +178,16 @@ export function SearchPage() {
                                 </div>
                                 <span className={cn(
                                     'text-left',
-                                    selectedPrefectures.size === 0 && 'text-muted-foreground'
+                                    state.selectedPrefectures.size === 0 && 'text-muted-foreground'
                                 )}>
                                     {getLocationSummary()}
                                 </span>
                             </div>
                             <ChevronRight className="h-5 w-5 text-muted-foreground" />
                         </Button>
-                        {selectedPrefectures.size > 0 && (
+                        {state.selectedPrefectures.size > 0 && (
                             <div className="flex flex-wrap gap-1.5 mt-3">
-                                {Array.from(selectedPrefectures).slice(0, 5).map(pref => (
+                                {Array.from(state.selectedPrefectures).slice(0, 5).map(pref => (
                                     <Badge
                                         key={pref}
                                         variant="secondary"
@@ -478,9 +205,9 @@ export function SearchPage() {
                                         </button>
                                     </Badge>
                                 ))}
-                                {selectedPrefectures.size > 5 && (
+                                {state.selectedPrefectures.size > 5 && (
                                     <Badge variant="outline" className="rounded-lg text-xs">
-                                        +{selectedPrefectures.size - 5}
+                                        +{state.selectedPrefectures.size - 5}
                                     </Badge>
                                 )}
                             </div>
@@ -496,7 +223,7 @@ export function SearchPage() {
                             variant="outline"
                             className={cn(
                                 'w-full h-12 rounded-xl justify-between',
-                                selectedJobTypes.size > 0 && 'border-primary bg-primary/5'
+                                state.selectedJobTypes.size > 0 && 'border-primary bg-primary/5'
                             )}
                             onClick={() => setIsJobTypeModalOpen(true)}
                             disabled={isScrapingRunning}
@@ -507,17 +234,17 @@ export function SearchPage() {
                                 </div>
                                 <span className={cn(
                                     'text-left',
-                                    selectedJobTypes.size === 0 && 'text-muted-foreground'
+                                    state.selectedJobTypes.size === 0 && 'text-muted-foreground'
                                 )}>
                                     {getJobTypeSummary()}
                                 </span>
                             </div>
                             <ChevronRight className="h-5 w-5 text-muted-foreground" />
                         </Button>
-                        {selectedJobTypes.size > 0 && (
+                        {state.selectedJobTypes.size > 0 && (
                             <div className="flex flex-wrap gap-1.5 mt-3">
                                 {jobTypeCategories
-                                    .filter(cat => selectedJobTypes.has(cat.id))
+                                    .filter(cat => state.selectedJobTypes.has(cat.id))
                                     .slice(0, 3)
                                     .map(cat => (
                                         <Badge
@@ -537,9 +264,9 @@ export function SearchPage() {
                                             </button>
                                         </Badge>
                                     ))}
-                                {selectedJobTypes.size > 3 && (
+                                {state.selectedJobTypes.size > 3 && (
                                     <Badge variant="outline" className="rounded-lg text-xs">
-                                        +{selectedJobTypes.size - 3}
+                                        +{state.selectedJobTypes.size - 3}
                                     </Badge>
                                 )}
                             </div>
@@ -559,14 +286,14 @@ export function SearchPage() {
                                     key={option.rank}
                                     className={cn(
                                         'flex items-center gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all',
-                                        selectedRanks.has(option.rank)
+                                        state.selectedRanks.has(option.rank)
                                             ? `${option.color} border-primary`
                                             : 'border-border hover:border-muted-foreground/30 opacity-50',
                                         isScrapingRunning && 'cursor-not-allowed'
                                     )}
                                 >
                                     <Checkbox
-                                        checked={selectedRanks.has(option.rank)}
+                                        checked={state.selectedRanks.has(option.rank)}
                                         onCheckedChange={() => toggleRank(option.rank)}
                                         disabled={isScrapingRunning}
                                     />
@@ -578,7 +305,7 @@ export function SearchPage() {
                                 </label>
                             ))}
                         </div>
-                        {selectedRanks.size < 3 && (
+                        {state.selectedRanks.size < 3 && (
                             <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
                                 ※ 選択されていないランクの企業はスクレイピング時にスキップされます
                             </p>
@@ -594,7 +321,7 @@ export function SearchPage() {
                                 年収下限
                             </label>
                             <Select
-                                value={salaryFilter}
+                                value={state.salaryFilter}
                                 onValueChange={setSalaryFilter}
                                 disabled={isScrapingRunning}
                             >
@@ -618,7 +345,7 @@ export function SearchPage() {
                                 企業規模
                             </label>
                             <Select
-                                value={employeesFilter}
+                                value={state.employeesFilter}
                                 onValueChange={setEmployeesFilter}
                                 disabled={isScrapingRunning}
                             >
@@ -642,7 +369,7 @@ export function SearchPage() {
                                 更新日
                             </label>
                             <Select
-                                value={jobUpdatedFilter}
+                                value={state.jobUpdatedFilter}
                                 onValueChange={setJobUpdatedFilter}
                                 disabled={isScrapingRunning}
                             >
@@ -659,7 +386,7 @@ export function SearchPage() {
                             </Select>
                         </div>
                     </div>
-                    {(salaryFilter !== 'all' || employeesFilter !== 'all' || jobUpdatedFilter !== 'all') && (
+                    {(state.salaryFilter !== 'all' || state.employeesFilter !== 'all' || state.jobUpdatedFilter !== 'all') && (
                         <p className="text-xs text-muted-foreground mt-2">
                             ※ フィルター条件に合わない求人はスクレイピング時にスキップされます
                         </p>
@@ -691,224 +418,23 @@ export function SearchPage() {
             </div>
 
             {/* 勤務地選択モーダル */}
-            <Dialog open={isLocationModalOpen} onOpenChange={setIsLocationModalOpen}>
-                <DialogContent className="max-w-3xl max-h-[80vh] rounded-2xl">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-3 text-xl">
-                            <div className="h-10 w-10 rounded-xl bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
-                                <MapPin className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                            </div>
-                            勤務地を選択
-                        </DialogTitle>
-                    </DialogHeader>
-                    <div className="flex gap-6 mt-4">
-                        {/* 地方タブ（左側） */}
-                        <div className="w-36 space-y-1">
-                            {regions.map(region => {
-                                const prefectures = regionPrefectures[region];
-                                const selectedCount = prefectures.filter(p => selectedPrefectures.has(p)).length;
-                                return (
-                                    <button
-                                        key={region}
-                                        className={cn(
-                                            'w-full text-left px-4 py-2.5 rounded-xl text-sm transition-all',
-                                            activeRegion === region
-                                                ? 'bg-primary/10 text-primary font-medium'
-                                                : 'hover:bg-muted text-muted-foreground hover:text-foreground'
-                                        )}
-                                        onClick={() => setActiveRegion(region)}
-                                    >
-                                        <span className="flex items-center justify-between">
-                                            {region}
-                                            {selectedCount > 0 && (
-                                                <span className="text-xs bg-primary text-primary-foreground px-1.5 py-0.5 rounded-full">
-                                                    {selectedCount}
-                                                </span>
-                                            )}
-                                        </span>
-                                    </button>
-                                );
-                            })}
-                        </div>
-
-                        {/* 都道府県チェックボックス（右側） */}
-                        <div className="flex-1 border-l pl-6">
-                            <div className="mb-4 flex items-center justify-between">
-                                <span className="font-semibold text-lg">{activeRegion}</span>
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="rounded-lg"
-                                    onClick={() => toggleRegion(activeRegion)}
-                                >
-                                    {regionPrefectures[activeRegion].every(p => selectedPrefectures.has(p))
-                                        ? 'すべて解除'
-                                        : 'すべて選択'}
-                                </Button>
-                            </div>
-                            <div className="grid grid-cols-3 gap-2 max-h-[300px] overflow-y-auto">
-                                {regionPrefectures[activeRegion].map(prefecture => (
-                                    <label
-                                        key={prefecture}
-                                        className={cn(
-                                            'flex items-center gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all',
-                                            selectedPrefectures.has(prefecture)
-                                                ? 'border-primary bg-primary/5'
-                                                : 'border-border hover:border-muted-foreground/30 hover:bg-muted/50'
-                                        )}
-                                    >
-                                        <Checkbox
-                                            checked={selectedPrefectures.has(prefecture)}
-                                            onCheckedChange={() => togglePrefecture(prefecture)}
-                                        />
-                                        <span className="text-sm">{prefecture}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* 選択済み表示 */}
-                    {selectedPrefectures.size > 0 && (
-                        <div className="mt-6 pt-4 border-t">
-                            <div className="flex items-center justify-between mb-3">
-                                <span className="text-sm font-medium">{selectedPrefectures.size}件選択中</span>
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="rounded-lg text-destructive hover:text-destructive"
-                                    onClick={() => setSelectedPrefectures(new Set())}
-                                >
-                                    すべてクリア
-                                </Button>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                                {Array.from(selectedPrefectures).map(pref => (
-                                    <Badge key={pref} variant="secondary" className="rounded-lg">
-                                        {pref}
-                                        <button
-                                            onClick={() => togglePrefecture(pref)}
-                                            className="ml-1.5 hover:text-destructive"
-                                        >
-                                            <X className="h-3 w-3" />
-                                        </button>
-                                    </Badge>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    <div className="mt-6 flex justify-end gap-3">
-                        <Button variant="outline" className="rounded-xl" onClick={() => setIsLocationModalOpen(false)}>
-                            キャンセル
-                        </Button>
-                        <Button className="rounded-xl" onClick={() => setIsLocationModalOpen(false)}>
-                            適用
-                        </Button>
-                    </div>
-                </DialogContent>
-            </Dialog>
+            <LocationModal
+                isOpen={isLocationModalOpen}
+                onClose={() => setIsLocationModalOpen(false)}
+                selectedPrefectures={state.selectedPrefectures}
+                togglePrefecture={togglePrefecture}
+                toggleRegion={toggleRegion}
+                clearPrefectures={clearPrefectures}
+            />
 
             {/* 職種選択モーダル */}
-            <Dialog open={isJobTypeModalOpen} onOpenChange={setIsJobTypeModalOpen}>
-                <DialogContent className="max-w-2xl max-h-[80vh] rounded-2xl">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-3 text-xl">
-                            <div className="h-10 w-10 rounded-xl bg-purple-100 dark:bg-purple-900 flex items-center justify-center">
-                                <Briefcase className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-                            </div>
-                            職種を選択
-                        </DialogTitle>
-                    </DialogHeader>
-                    <div className="mt-4">
-                        <div className="grid grid-cols-2 gap-3">
-                            {jobTypeCategories.map(category => (
-                                <label
-                                    key={category.id}
-                                    className={cn(
-                                        'flex items-center gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all',
-                                        selectedJobTypes.has(category.id)
-                                            ? 'border-primary bg-primary/5'
-                                            : 'border-border hover:border-muted-foreground/30 hover:bg-muted/50'
-                                    )}
-                                >
-                                    <Checkbox
-                                        checked={selectedJobTypes.has(category.id)}
-                                        onCheckedChange={() => toggleJobType(category.id)}
-                                    />
-                                    <span className="text-2xl">{category.icon}</span>
-                                    <span className="text-sm font-medium flex-1">{category.name}</span>
-                                </label>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* 選択済み表示 */}
-                    {selectedJobTypes.size > 0 && (
-                        <div className="mt-6 pt-4 border-t">
-                            <div className="flex items-center justify-between">
-                                <span className="text-sm font-medium">{selectedJobTypes.size}件選択中</span>
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="rounded-lg text-destructive hover:text-destructive"
-                                    onClick={() => setSelectedJobTypes(new Set())}
-                                >
-                                    すべてクリア
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-
-                    <div className="mt-6 flex justify-end gap-3">
-                        <Button variant="outline" className="rounded-xl" onClick={() => setIsJobTypeModalOpen(false)}>
-                            キャンセル
-                        </Button>
-                        <Button className="rounded-xl" onClick={() => setIsJobTypeModalOpen(false)}>
-                            適用
-                        </Button>
-                    </div>
-                </DialogContent>
-            </Dialog>
-        </div>
-    );
-}
-
-// 経過時間表示コンポーネント
-function ElapsedTime({ startTime, estimatedMinutes }: { startTime?: number; estimatedMinutes?: number }) {
-    const [elapsed, setElapsed] = useState(0);
-
-    useEffect(() => {
-        if (!startTime) return;
-
-        const updateElapsed = () => {
-            setElapsed(Math.floor((Date.now() - startTime) / 1000));
-        };
-
-        updateElapsed();
-        const interval = setInterval(updateElapsed, 1000);
-
-        return () => clearInterval(interval);
-    }, [startTime]);
-
-    if (!startTime) return null;
-
-    const formatTime = (seconds: number) => {
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    };
-
-    return (
-        <div className="flex items-center justify-between p-3 rounded-xl bg-card border">
-            <div className="flex items-center gap-2 text-sm">
-                <Clock className="h-4 w-4 text-muted-foreground" />
-                <span className="text-muted-foreground">経過時間:</span>
-                <span className="font-mono font-semibold">{formatTime(elapsed)}</span>
-            </div>
-            {estimatedMinutes !== undefined && estimatedMinutes > 0 && (
-                <span className="text-sm text-muted-foreground">残り約 {estimatedMinutes} 分</span>
-            )}
+            <JobTypeModal
+                isOpen={isJobTypeModalOpen}
+                onClose={() => setIsJobTypeModalOpen(false)}
+                selectedJobTypes={state.selectedJobTypes}
+                toggleJobType={toggleJobType}
+                clearJobTypes={clearJobTypes}
+            />
         </div>
     );
 }

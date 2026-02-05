@@ -98,6 +98,8 @@ const electronAPI = {
             ipcRenderer.invoke('scraper:start', options),
         stop: (): Promise<{ success: boolean }> =>
             ipcRenderer.invoke('scraper:stop'),
+        confirm: (proceed: boolean): Promise<{ success: boolean }> =>
+            ipcRenderer.invoke('scraper:confirm', proceed),
         onProgress: (callback: (progress: ScrapingProgress) => void) => {
             ipcRenderer.on('scraper:progress', (_event, progress) => callback(progress));
         },

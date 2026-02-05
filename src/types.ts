@@ -59,7 +59,6 @@ export interface Company {
     // 求人ページ更新日関連フィールド
     job_page_updated_at: string | null;  // 求人ページの最終更新日
     job_page_end_date: string | null;    // 掲載終了予定日
-    job_page_start_date: string | null;  // 掲載開始日(doda)
     // 職種カテゴリ
     job_type: string | null;             // 15統合カテゴリの職種
 }
@@ -76,14 +75,11 @@ export interface ScrapingOptions {
     prefectures?: string[];  // 複数の都道府県
     jobTypes?: string[];     // 複数の職種カテゴリ（検索条件）
     rankFilter?: BudgetRank[];  // 保存対象のランク（空配列または未指定で全て保存）
-    // 検索URL用フィルター（スクレイピング前）
-    minSalary?: number;          // 年収下限（万円）- mynavi, rikunabi
+    // 事前フィルター（検索URL・サイドバーで適用）
+    minSalary?: number;          // 年収下限（万円）
     minEmployees?: number;       // 従業員数下限 - mynavi
     newPostsOnly?: boolean;      // 新着求人のみ - mynavi
-    // 事後フィルター（スクレイピング後）
-    employeeRange?: string;      // 従業員数範囲指定（例: "50-100", "1000-"）
-    maxJobUpdatedDays?: number;  // 求人更新日から何日以内
-    jobTypeFilter?: string[];    // 職種カテゴリフィルター
+    employeeRange?: string;      // 従業員数範囲（例: "50-100"）- doda
 }
 
 export interface ScrapingProgress {
@@ -96,6 +92,8 @@ export interface ScrapingProgress {
     totalJobs?: number;          // 検索条件に合った総求人件数
     estimatedMinutes?: number;   // 完了までの推定時間（分）
     startTime?: number;          // スクレイピング開始時刻
+    // 確認ステップ
+    waitingConfirmation?: boolean;  // 確認待ち状態
 }
 
 // 更新機能関連の型定義
@@ -139,6 +137,7 @@ export interface IElectronAPI {
     scraper: {
         start: (options: ScrapingOptions) => Promise<{ success: boolean; error?: string }>;
         stop: () => Promise<void>;
+        confirm: (proceed: boolean) => Promise<{ success: boolean }>;
         onProgress: (callback: (progress: ScrapingProgress) => void) => void;
         offProgress: () => void;
         onLog: (callback: (message: string) => void) => void;

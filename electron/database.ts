@@ -259,12 +259,6 @@ function migrateJobPageDateColumns(database: Database.Database) {
         database.exec(`ALTER TABLE companies ADD COLUMN job_page_end_date DATETIME`);
     }
 
-    // job_page_start_date: 掲載開始日（doda用）
-    if (!existingColumns.has('job_page_start_date')) {
-        console.log('[Database] Adding job_page_start_date column to companies table');
-        database.exec(`ALTER TABLE companies ADD COLUMN job_page_start_date DATETIME`);
-    }
-
     // インデックス作成
     database.exec(`CREATE INDEX IF NOT EXISTS idx_companies_job_page_updated ON companies(job_page_updated_at DESC)`);
 }
@@ -421,9 +415,6 @@ export const companyRepository = {
             }
             if (company.job_page_end_date) {
                 updateFields.job_page_end_date = company.job_page_end_date;
-            }
-            if (company.job_page_start_date) {
-                updateFields.job_page_start_date = company.job_page_start_date;
             }
 
             // 職種カテゴリの更新
