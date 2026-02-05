@@ -661,6 +661,18 @@ export class ScrapingEngine {
                     }
                 }
 
+                // 求人更新日フィルター
+                if (options.maxJobUpdatedDays && company.job_page_updated_at) {
+                    const updatedAt = new Date(company.job_page_updated_at);
+                    const now = new Date();
+                    const daysDiff = Math.floor((now.getTime() - updatedAt.getTime()) / (1000 * 60 * 60 * 24));
+                    if (daysDiff > options.maxJobUpdatedDays) {
+                        skippedCount++;
+                        updateProgress();
+                        return;
+                    }
+                }
+
                 // 重複チェック
                 const existsByName = companyRepository.existsByName(company.company_name);
                 if (existsByName) {

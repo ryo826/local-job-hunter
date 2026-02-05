@@ -3,7 +3,6 @@ import type { Company, CompanyFilters, ScrapingProgress, ScrapingOptions, Update
 
 // スクレイピング設定の状態
 export interface ScrapingSettingsState {
-    keyword: string;
     selectedSites: {
         mynavi: boolean;
         rikunabi: boolean;

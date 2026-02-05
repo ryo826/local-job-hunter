@@ -132,7 +132,6 @@ const siteInfo = {
 export function SearchPage() {
     const { isScrapingRunning, scrapingProgress, scrapingSettings, startScraping, stopScraping, setScrapingSettings } = useAppStore();
 
-    const [keyword, setKeyword] = useState('');
     const [selectedSites, setSelectedSites] = useState({
         mynavi: true,
         rikunabi: true,
@@ -159,7 +158,6 @@ export function SearchPage() {
     // スクレイピング実行中の設定を復元
     useEffect(() => {
         if (isScrapingRunning && scrapingSettings) {
-            setKeyword(scrapingSettings.keyword);
             setSelectedSites(scrapingSettings.selectedSites);
             setSelectedPrefectures(new Set(scrapingSettings.selectedPrefectures));
             setSelectedJobTypes(new Set(scrapingSettings.selectedJobTypes));
@@ -286,7 +284,6 @@ export function SearchPage() {
 
         // 設定を保存（ページ移動時に復元するため）
         setScrapingSettings({
-            keyword,
             selectedSites,
             selectedPrefectures: Array.from(selectedPrefectures),
             selectedJobTypes: Array.from(selectedJobTypes),
@@ -298,7 +295,6 @@ export function SearchPage() {
 
         await startScraping({
             sources,
-            keywords: keyword || undefined,
             prefectures: selectedPrefectures.size > 0 ? Array.from(selectedPrefectures) : undefined,
             jobTypes: selectedJobTypeNames.length > 0 ? selectedJobTypeNames : undefined,
             // 全て選択されている場合はフィルターなし、一部のみの場合は選択されたランクのみ
@@ -435,20 +431,6 @@ export function SearchPage() {
             <Card className="p-6 rounded-2xl shadow-sm">
                 <h2 className="text-lg font-semibold mb-4">検索条件</h2>
                 <div className="space-y-4">
-                    {/* キーワード */}
-                    <div>
-                        <label className="text-sm font-medium text-foreground mb-2 block">
-                            キーワード
-                        </label>
-                        <Input
-                            placeholder="検索キーワードを入力（空欄で新着全件取得）"
-                            value={keyword}
-                            onChange={(e) => setKeyword(e.target.value)}
-                            className="h-12 rounded-xl text-base"
-                            disabled={isScrapingRunning}
-                        />
-                    </div>
-
                     {/* 勤務地選択ボタン */}
                     <div>
                         <label className="text-sm font-medium text-foreground mb-2 block">
