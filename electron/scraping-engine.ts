@@ -587,7 +587,7 @@ export class ScrapingEngine {
                 totalJobs = count;
             };
 
-            const jobUrls = await strategy.collectJobUrls(mainPage, params, { onLog: log, onTotalCount });
+            let jobUrls = await strategy.collectJobUrls(mainPage, params, { onLog: log, onTotalCount });
             log(`${jobUrls.length}件のURLを収集完了`);
 
             await mainPage.close();
@@ -596,6 +596,22 @@ export class ScrapingEngine {
             if (jobUrls.length === 0) {
                 log('収集されたURLがありません');
                 return;
+            }
+
+            // ★ ランクフィルターを詳細ページ訪問前に適用（最適化）
+            if (options.rankFilter && options.rankFilter.length > 0) {
+                const beforeCount = jobUrls.length;
+                jobUrls = jobUrls.filter(job => job.rank && options.rankFilter!.includes(job.rank));
+                const filteredCount = beforeCount - jobUrls.length;
+                if (filteredCount > 0) {
+                    log(`ランクフィルター適用: ${filteredCount}件スキップ (対象ランク: ${options.rankFilter.join(', ')})`);
+                    skippedCount += filteredCount;
+                }
+                if (jobUrls.length === 0) {
+                    log('フィルター適用後、対象の求人がありません');
+                    return;
+                }
+                log(`フィルター後: ${jobUrls.length}件の詳細ページを訪問`);
             }
 
             // Step 2: 並列で詳細ページをスクレイピング
@@ -623,17 +639,8 @@ export class ScrapingEngine {
             };
 
             // 会社データを処理する関数
+            // ※ランクフィルターは詳細ページ訪問前に適用済み
             const processCompany = async (company: CompanyData): Promise<void> => {
-                // ランクフィルター
-                if (options.rankFilter && options.rankFilter.length > 0) {
-                    if (!company.budget_rank || !options.rankFilter.includes(company.budget_rank)) {
-                        log(`ランクフィルターでスキップ: ${company.company_name} (rank: ${company.budget_rank})`);
-                        skippedCount++;
-                        updateProgress();
-                        return;
-                    }
-                }
-
                 // 給与フィルター
                 if (options.minSalary) {
                     const salary = parseSalary(company.salary_text);
