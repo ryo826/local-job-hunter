@@ -106,8 +106,13 @@ function createWindow(): void {
     }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
     initDB();
+
+    // One-time migration from local SQLite to Supabase
+    const { migrateToSupabase } = await import('./migrate-to-supabase');
+    await migrateToSupabase();
+
     createWindow();
 
     app.on('activate', () => {
