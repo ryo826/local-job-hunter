@@ -7,6 +7,7 @@ export type BudgetRank = 'A' | 'B' | 'C';
 // 求人カード情報（リストページから取得）
 export interface JobCardInfo {
     url: string;
+    detailUrl?: string;  // 詳細ページURL（事前計算済み）
     companyName: string;
     jobTitle?: string;
     rank?: BudgetRank;

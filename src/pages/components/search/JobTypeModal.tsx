@@ -8,11 +8,12 @@ import {
 } from '@/components/ui/dialog';
 import { Briefcase } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { jobTypeCategories } from './constants';
+import type { JobTypeCategory } from './constants';
 
 interface JobTypeModalProps {
     isOpen: boolean;
     onClose: () => void;
+    categories: JobTypeCategory[];
     selectedJobTypes: Set<string>;
     toggleJobType: (jobTypeId: string) => void;
     clearJobTypes: () => void;
@@ -21,6 +22,7 @@ interface JobTypeModalProps {
 export function JobTypeModal({
     isOpen,
     onClose,
+    categories,
     selectedJobTypes,
     toggleJobType,
     clearJobTypes,
@@ -38,7 +40,7 @@ export function JobTypeModal({
                 </DialogHeader>
                 <div className="mt-4">
                     <div className="grid grid-cols-2 gap-3">
-                        {jobTypeCategories.map(category => (
+                        {categories.map(category => (
                             <label
                                 key={category.id}
                                 className={cn(

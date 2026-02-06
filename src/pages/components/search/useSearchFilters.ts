@@ -2,16 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import type { BudgetRank } from '@/types';
 import type { SiteKey } from './constants';
-import { jobTypeCategories, regionPrefectures } from './constants';
-
-export interface SelectedSites {
-    mynavi: boolean;
-    rikunabi: boolean;
-    doda: boolean;
-}
+import { getJobTypeCategoriesForSite, regionPrefectures, siteFilterSupport } from './constants';
 
 export interface SearchFiltersState {
-    selectedSites: SelectedSites;
+    selectedSite: SiteKey;  // 単一選択に変更
     selectedPrefectures: Set<string>;
     selectedJobTypes: Set<string>;
     selectedRanks: Set<BudgetRank>;
@@ -22,7 +16,7 @@ export interface SearchFiltersState {
 
 export interface UseSearchFiltersReturn {
     state: SearchFiltersState;
-    toggleSite: (site: SiteKey) => void;
+    selectSite: (site: SiteKey) => void;  // toggleSiteからselectSiteに変更
     togglePrefecture: (prefecture: string) => void;
     toggleRegion: (region: string) => void;
     toggleJobType: (jobTypeId: string) => void;
@@ -34,11 +28,11 @@ export interface UseSearchFiltersReturn {
     clearJobTypes: () => void;
     getLocationSummary: () => string;
     getJobTypeSummary: () => string;
-    selectedSiteCount: number;
+    isFilterSupported: (filter: 'salary' | 'employees' | 'jobUpdated') => boolean;
 }
 
 const DEFAULT_STATE: SearchFiltersState = {
-    selectedSites: { mynavi: true, rikunabi: true, doda: true },
+    selectedSite: 'doda',  // デフォルトでdodaを選択（最も機能が充実）
     selectedPrefectures: new Set(),
     selectedJobTypes: new Set(),
     selectedRanks: new Set(['A', 'B', 'C'] as BudgetRank[]),
@@ -56,7 +50,7 @@ export function useSearchFilters(): UseSearchFiltersReturn {
     useEffect(() => {
         if (isScrapingRunning && scrapingSettings) {
             setState({
-                selectedSites: scrapingSettings.selectedSites,
+                selectedSite: scrapingSettings.selectedSite || 'doda',
                 selectedPrefectures: new Set(scrapingSettings.selectedPrefectures),
                 selectedJobTypes: new Set(scrapingSettings.selectedJobTypes),
                 selectedRanks: new Set(scrapingSettings.selectedRanks),
@@ -67,14 +61,21 @@ export function useSearchFilters(): UseSearchFiltersReturn {
         }
     }, []);
 
-    const toggleSite = useCallback((site: SiteKey) => {
-        setState(prev => ({
-            ...prev,
-            selectedSites: {
-                ...prev.selectedSites,
-                [site]: !prev.selectedSites[site],
-            },
-        }));
+    // サイト選択（単一選択）- 非対応フィルターをリセット、職種もリセット
+    const selectSite = useCallback((site: SiteKey) => {
+        setState(prev => {
+            const support = siteFilterSupport[site];
+            return {
+                ...prev,
+                selectedSite: site,
+                // サイト間でカテゴリIDが異なるため職種選択をリセット
+                selectedJobTypes: new Set<string>(),
+                // 非対応フィルターをリセット
+                salaryFilter: support.salary ? prev.salaryFilter : 'all',
+                employeesFilter: support.employees ? prev.employeesFilter : 'all',
+                jobUpdatedFilter: support.jobUpdated ? prev.jobUpdatedFilter : 'all',
+            };
+        });
     }, []);
 
     const togglePrefecture = useCallback((prefecture: string) => {
@@ -160,20 +161,24 @@ export function useSearchFilters(): UseSearchFiltersReturn {
 
     const getJobTypeSummary = useCallback(() => {
         if (state.selectedJobTypes.size === 0) return '選択してください';
-        const selectedNames = jobTypeCategories
+        const categories = getJobTypeCategoriesForSite(state.selectedSite);
+        const selectedNames = categories
             .filter(cat => state.selectedJobTypes.has(cat.id))
             .map(cat => cat.name);
         if (selectedNames.length <= 2) {
             return selectedNames.join(', ');
         }
         return `${selectedNames.slice(0, 2).join(', ')} 他${selectedNames.length - 2}件`;
-    }, [state.selectedJobTypes]);
+    }, [state.selectedJobTypes, state.selectedSite]);
 
-    const selectedSiteCount = Object.values(state.selectedSites).filter(Boolean).length;
+    // 選択中のサイトで特定のフィルターがサポートされているか
+    const isFilterSupported = useCallback((filter: 'salary' | 'employees' | 'jobUpdated') => {
+        return siteFilterSupport[state.selectedSite][filter];
+    }, [state.selectedSite]);
 
     return {
         state,
-        toggleSite,
+        selectSite,
         togglePrefecture,
         toggleRegion,
         toggleJobType,
@@ -185,6 +190,6 @@ export function useSearchFilters(): UseSearchFiltersReturn {
         clearJobTypes,
         getLocationSummary,
         getJobTypeSummary,
-        selectedSiteCount,
+        isFilterSupported,
     };
 }

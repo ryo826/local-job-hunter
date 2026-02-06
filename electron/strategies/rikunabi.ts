@@ -1038,71 +1038,197 @@ export class RikunabiStrategy implements ScrapingStrategy {
         const logFn = log || ((msg: string) => console.log(`[Rikunabi] ${msg}`));
 
         // リトライロジック
-        let retries = 2;
+        let retries = 1;
         while (retries >= 0) {
             try {
                 logFn(`Visiting: ${jobInfo.companyName || jobInfo.url}`);
 
-                await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
                 await page.waitForTimeout(randomDelay(500, 1000));
 
-            // 求人タイトルを取得
-            let jobTitle = jobInfo.jobTitle;
-            if (!jobTitle) {
-                const titleEl = page.locator('h1[class*="styles_heading"], h2[class*="styles_title"]').first();
-                if (await titleEl.count() > 0) {
-                    jobTitle = (await titleEl.textContent())?.trim() || '';
-                }
-            }
+            // 全フィールドを1回のpage.evaluate()で一括抽出
+            const fields = await page.evaluate(() => {
+                const result: Record<string, string> = {};
 
-            // 会社名を取得
-            let companyName = jobInfo.companyName;
-            if (!companyName) {
-                const companyLinkEl = page.locator('a[class*="styles_linkTextCompany"]').first();
-                if (await companyLinkEl.count() > 0) {
-                    companyName = (await companyLinkEl.textContent())?.trim() || '';
+                // 求人タイトル
+                const titleEl = document.querySelector('h1[class*="styles_heading"], h2[class*="styles_title"]');
+                result.jobTitle = titleEl?.textContent?.trim() || '';
+
+                // 会社名
+                const companyLinkEl = document.querySelector('a[class*="styles_linkTextCompany"]');
+                result.companyName = companyLinkEl?.textContent?.trim() || '';
+                if (!result.companyName) {
+                    const employerEl = document.querySelector('[class*="styles_employerName"]');
+                    result.companyName = employerEl?.textContent?.trim() || '';
                 }
-            }
+
+                // 募集要項テーブル
+                const appTable = document.querySelector('table[class*="styles_tableAboutApplication"]');
+                if (appTable) {
+                    const rows = appTable.querySelectorAll('tr[class*="styles_row"]');
+                    for (const row of rows) {
+                        const th = row.querySelector('th[class*="styles_title"]');
+                        const td = row.querySelector('td[class*="styles_content"]');
+                        if (th && td) {
+                            const label = th.textContent?.trim() || '';
+                            result[`job_${label}`] = td.textContent?.trim() || '';
+                        }
+                    }
+                }
+
+                // 企業情報テーブル（4つのフォールバックセレクター）
+                const companySelectors = [
+                    'tbody[class*="companyInfo"]',
+                    'tbody[class*="styles_companyInfo"]',
+                    'section:has(h2:text("企業情報"))',
+                ];
+                let companyRows: NodeListOf<Element> | null = null;
+                for (const sel of companySelectors) {
+                    try {
+                        const container = document.querySelector(sel);
+                        if (container) {
+                            companyRows = container.querySelectorAll('tr');
+                            break;
+                        }
+                    } catch { /* ignore */ }
+                }
+
+                // リンクから実際のURLを抽出するヘルパー
+                const extractRealUrl = (td: Element): string | null => {
+                    const link = td.querySelector('a[href^="http"]') as HTMLAnchorElement | null;
+                    if (!link) return null;
+                    // 直接の外部リンク
+                    if (!link.href.includes('rikunabi.com')) return link.href;
+                    // rikunabiリダイレクトURL → urlパラメータから実URLを抽出
+                    try {
+                        const url = new URL(link.href);
+                        const redirectUrl = url.searchParams.get('url') || url.searchParams.get('redirect');
+                        if (redirectUrl) return redirectUrl;
+                    } catch { /* ignore */ }
+                    // リンクテキストがURLの場合
+                    const text = link.textContent?.trim() || '';
+                    if (text.startsWith('http') && !text.includes('rikunabi.com')) return text;
+                    return null;
+                };
+
+                if (companyRows) {
+                    for (const row of companyRows) {
+                        const th = row.querySelector('th h3, th[class*="title"], th');
+                        const td = row.querySelector('td');
+                        if (!th || !td) continue;
+                        const label = th.textContent?.trim() || '';
+
+                        const realUrl = extractRealUrl(td);
+                        if (realUrl) {
+                            result[`company_${label}`] = realUrl;
+                        } else {
+                            result[`company_${label}`] = td.textContent?.trim() || '';
+                        }
+                    }
+                }
+
+                // dt/ddパターンもフォールバック
+                if (!companyRows || companyRows.length === 0) {
+                    const dls = document.querySelectorAll('dl');
+                    for (const dl of dls) {
+                        const dts = dl.querySelectorAll('dt');
+                        for (const dt of dts) {
+                            const label = dt.textContent?.trim() || '';
+                            if (!label) continue;
+                            const dd = dt.nextElementSibling;
+                            if (dd && dd.tagName === 'DD') {
+                                const realUrl = extractRealUrl(dd);
+                                if (realUrl) {
+                                    result[`company_${label}`] = realUrl;
+                                } else {
+                                    result[`company_${label}`] = dd.textContent?.trim() || '';
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 企業HPフォールバック: HPのURLがまだ取れていない場合
+                const hpKeys = ['company_企業ホームページ', 'company_企業HP', 'company_ホームページ', 'company_HP', 'company_WEBサイト', 'company_Webサイト', 'company_公式サイト'];
+                const hasHpUrl = hpKeys.some(k => result[k] && (result[k] as string).startsWith('http'));
+                if (!hasHpUrl) {
+                    const hpLabels = ['企業HP', 'ホームページ', 'HP', '企業サイト', 'コーポレートサイト', '会社HP'];
+                    for (const label of hpLabels) {
+                        const ths = document.querySelectorAll('th');
+                        for (const th of ths) {
+                            if (th.textContent?.includes(label)) {
+                                const tr = th.closest('tr');
+                                if (tr) {
+                                    const td = tr.querySelector('td');
+                                    if (td) {
+                                        const url = extractRealUrl(td);
+                                        if (url) {
+                                            result['company_企業HP'] = url;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (result['company_企業HP'] && (result['company_企業HP'] as string).startsWith('http')) break;
+                    }
+                }
+
+                // __NEXT_DATA__から日付取得
+                const scriptTag = document.querySelector('script#__NEXT_DATA__');
+                if (scriptTag?.textContent) {
+                    try {
+                        const data = JSON.parse(scriptTag.textContent);
+                        const timestamp = data?.props?.pageProps?.job?.lettice?.letticeLogBase?.datePublished
+                            || data?.props?.pageProps?.jobData?.datePublished;
+                        if (timestamp && typeof timestamp === 'number') {
+                            result.datePublished = new Date(timestamp).toISOString();
+                        }
+                    } catch { /* ignore */ }
+                }
+
+                return result;
+            });
+
+            // 求人タイトル・会社名
+            const jobTitle = jobInfo.jobTitle || fields.jobTitle || '';
+            const companyName = jobInfo.companyName || fields.companyName || '';
 
             if (!companyName) {
                 logFn('No company name found, skipping');
                 return null;
             }
 
-            // 募集要項と企業情報を抽出
-            const jobDetails = await this.extractJobDetails(page, logFn);
-            const companyInfo = await this.extractCompanyInfo(page, logFn);
-
-            const address = companyInfo['本社所在地'] || jobDetails['勤務地'] || '';
+            const address = fields['company_本社所在地'] || fields['job_勤務地'] || '';
             const normalizedAddress = normalizeAddressUtil(address);
             const cleanName = cleanCompanyNameUtil(companyName);
-            const homepageUrl = companyInfo['企業ホームページ'] || companyInfo['企業HP'] || companyInfo['ホームページ'] || companyInfo['HP'] || '';
+            const homepageUrl = fields['company_企業ホームページ'] || fields['company_企業HP'] || fields['company_ホームページ'] || fields['company_HP'] || '';
 
                 return {
                     source: this.source,
                     url: jobInfo.url,
                     company_name: cleanName,
                     job_title: jobTitle,
-                    salary_text: normalizeSalary(jobDetails['給与']),
-                    representative: companyInfo['代表者'] || '',
-                    establishment: companyInfo['設立'] || '',
-                    employees: normalizeEmployees(companyInfo['従業員数']),
-                    revenue: companyInfo['売上高'] || '',
-                    phone: companyInfo['企業代表番号'] || '',
+                    salary_text: normalizeSalary(fields['job_給与'] || undefined),
+                    representative: fields['company_代表者'] || '',
+                    establishment: fields['company_設立'] || '',
+                    employees: normalizeEmployees(fields['company_従業員数'] || undefined),
+                    revenue: fields['company_売上高'] || '',
+                    phone: fields['company_企業代表番号'] || '',
                     address: normalizedAddress,
                     area: normalizeArea(extractPrefectureFromAddress(normalizedAddress)),
                     homepage_url: homepageUrl,
-                    industry: normalizeIndustry(companyInfo['事業内容']),
+                    industry: normalizeIndustry(fields['company_事業内容'] || undefined),
                     scrape_status: 'step1_completed',
                     budget_rank: jobInfo.rank,
                     rank_confidence: jobInfo.rank === 'A' ? 0.9 : (jobInfo.rank === 'B' ? 0.7 : 0.6),
-                    job_page_updated_at: (await extractRikunabiJobDate(page))?.toISOString() || null,
+                    job_page_updated_at: fields.datePublished || null,
                 };
             } catch (error: any) {
                 retries--;
                 if (retries >= 0) {
-                    logFn(`Retry (${2 - retries}/2) for ${jobInfo.companyName}: ${error.message}`);
-                    await page.waitForTimeout(2000);
+                    logFn(`Retry for ${jobInfo.companyName}: ${error.message}`);
+                    await page.waitForTimeout(1000);
                 } else {
                     logFn(`Failed ${jobInfo.companyName}: ${error.message}`);
                     return null;

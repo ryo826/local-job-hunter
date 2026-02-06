@@ -1,6 +1,8 @@
 import { dialog } from 'electron';
 import * as fs from 'fs';
-import { companyRepository } from '../database';
+import { SupabaseCompanyRepository } from '../repositories/SupabaseCompanyRepository';
+
+const companyRepository = new SupabaseCompanyRepository();
 
 export interface ExportOptions {
     ids?: number[];
@@ -20,12 +22,13 @@ export class ExportService {
             let companies;
             if (options.ids && options.ids.length > 0) {
                 // Export selected companies
-                companies = options.ids
-                    .map(id => companyRepository.getById(id))
-                    .filter(c => c !== null);
+                const results = await Promise.all(
+                    options.ids.map(id => companyRepository.getById(id))
+                );
+                companies = results.filter(c => c !== null);
             } else {
                 // Export all companies (with filters if provided)
-                companies = companyRepository.getAll(options.filters || {});
+                companies = await companyRepository.getAll(options.filters || {});
             }
 
             if (companies.length === 0) {

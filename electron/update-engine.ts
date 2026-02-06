@@ -1,9 +1,7 @@
 import { chromium, Browser, Page, Locator, BrowserContext } from 'playwright';
-import { companyRepository } from './database';
+import { SupabaseCompanyRepository } from './repositories/SupabaseCompanyRepository';
 import type { Company, BudgetRank, UpdateProgress, UpdateResult, UpdateChanges } from '../src/types';
-import Database from 'better-sqlite3';
-import path from 'path';
-import { app } from 'electron';
+import { supabase } from './supabase';
 
 // 並列処理の設定
 const PARALLEL_COMPANIES = 3;  // 同時に更新する会社数
@@ -54,11 +52,10 @@ export class UpdateEngine {
     private browser: Browser | null = null;
     private isRunning = false;
     private shouldStop = false;
-    private db: Database.Database;
+    private companyRepo: SupabaseCompanyRepository;
 
     constructor() {
-        const dbPath = path.join(app.getPath('userData'), 'companies.db');
-        this.db = new Database(dbPath);
+        this.companyRepo = new SupabaseCompanyRepository();
     }
 
     async start(
@@ -92,11 +89,12 @@ export class UpdateEngine {
             // 対象会社リストを取得
             let companies: Company[];
             if (companyIds && companyIds.length > 0) {
-                companies = companyIds
-                    .map(id => companyRepository.getById(id))
-                    .filter((c): c is Company => c !== null);
+                const results = await Promise.all(
+                    companyIds.map(id => this.companyRepo.getById(id))
+                );
+                companies = results.filter((c): c is Company => c !== null);
             } else {
-                companies = companyRepository.getAll({});
+                companies = await this.companyRepo.getAll({});
             }
 
             log(`更新対象: ${companies.length}社 (${PARALLEL_COMPANIES}並列処理)`);
@@ -595,48 +593,38 @@ export class UpdateEngine {
         newData: ScrapingResult,
         changes: UpdateChanges
     ): Promise<void> {
-        const updates: string[] = [];
-        const params: any[] = [];
+        // First get current data for update_count increment and last_rank
+        const current = await this.companyRepo.getById(companyId);
+        if (!current) return;
 
-        updates.push('last_updated_at = ?');
-        params.push(new Date().toISOString());
-
-        updates.push('update_count = update_count + 1');
+        const updateData: Record<string, any> = {
+            last_updated_at: new Date().toISOString(),
+            update_count: (current.update_count || 0) + 1,
+            job_count: newData.jobCount,
+            updated_at: new Date().toISOString(),
+        };
 
         if (changes.rank && changes.rank.new) {
-            updates.push('last_rank = budget_rank');
-            updates.push('budget_rank = ?');
-            params.push(changes.rank.new);
-            updates.push('rank_changed_at = ?');
-            params.push(new Date().toISOString());
+            updateData.last_rank = current.budget_rank;
+            updateData.budget_rank = changes.rank.new;
+            updateData.rank_changed_at = new Date().toISOString();
         }
 
-        updates.push('job_count = ?');
-        params.push(newData.jobCount);
-
         if (changes.status) {
-            updates.push('listing_status = ?');
-            params.push(changes.status.new);
+            updateData.listing_status = changes.status.new;
         }
 
         if (newData.jobs.length > 0) {
-            updates.push('latest_job_title = ?');
-            params.push(newData.jobs[0].title);
+            updateData.latest_job_title = newData.jobs[0].title;
         }
 
         if (newData.latestJobPageUpdatedAt) {
-            updates.push('job_page_updated_at = ?');
-            params.push(newData.latestJobPageUpdatedAt.toISOString());
+            updateData.job_page_updated_at = newData.latestJobPageUpdatedAt.toISOString();
         }
         if (newData.latestJobPageEndDate) {
-            updates.push('job_page_end_date = ?');
-            params.push(newData.latestJobPageEndDate.toISOString());
+            updateData.job_page_end_date = newData.latestJobPageEndDate.toISOString();
         }
 
-        params.push(companyId);
-
-        this.db.prepare(
-            `UPDATE companies SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-        ).run(...params);
+        await this.companyRepo.update(companyId, updateData as Partial<Company>);
     }
 }

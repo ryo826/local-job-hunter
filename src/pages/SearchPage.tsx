@@ -16,11 +16,11 @@ import { cn } from '@/lib/utils';
 import type { SiteKey } from './components/search/constants';
 import {
     rankOptions,
-    jobTypeCategories,
     salaryOptions,
     employeeOptions,
     jobUpdatedOptions,
     siteInfo,
+    getJobTypeCategoriesForSite,
 } from './components/search/constants';
 import { useSearchFilters } from './components/search/useSearchFilters';
 import { LocationModal } from './components/search/LocationModal';
@@ -32,7 +32,7 @@ export function SearchPage() {
 
     const {
         state,
-        toggleSite,
+        selectSite,
         togglePrefecture,
         toggleRegion,
         toggleJobType,
@@ -44,7 +44,7 @@ export function SearchPage() {
         clearJobTypes,
         getLocationSummary,
         getJobTypeSummary,
-        selectedSiteCount,
+        isFilterSupported,
     } = useSearchFilters();
 
     const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
@@ -63,24 +63,17 @@ export function SearchPage() {
         };
     }, []);
 
+    const currentJobTypeCategories = getJobTypeCategoriesForSite(state.selectedSite);
+
     const handleStartScraping = async () => {
-        const sources = Object.entries(state.selectedSites)
-            .filter(([, enabled]) => enabled)
-            .map(([source]) => source);
-
-        if (sources.length === 0) {
-            alert('スクレイピング対象のサイトを選択してください');
-            return;
-        }
-
         // 選択された職種名を取得
-        const selectedJobTypeNames = jobTypeCategories
+        const selectedJobTypeNames = currentJobTypeCategories
             .filter(cat => state.selectedJobTypes.has(cat.id))
             .map(cat => cat.name);
 
         // 設定を保存（ページ移動時に復元するため）
         setScrapingSettings({
-            selectedSites: state.selectedSites,
+            selectedSite: state.selectedSite,
             selectedPrefectures: Array.from(state.selectedPrefectures),
             selectedJobTypes: Array.from(state.selectedJobTypes),
             selectedRanks: Array.from(state.selectedRanks),
@@ -90,12 +83,12 @@ export function SearchPage() {
         });
 
         await startScraping({
-            sources,
+            sources: [state.selectedSite],  // 単一サイト
             prefectures: state.selectedPrefectures.size > 0 ? Array.from(state.selectedPrefectures) : undefined,
             jobTypes: selectedJobTypeNames.length > 0 ? selectedJobTypeNames : undefined,
             rankFilter: state.selectedRanks.size < 3 ? Array.from(state.selectedRanks) : undefined,
-            minSalary: state.salaryFilter !== 'all' ? parseInt(state.salaryFilter) : undefined,
-            employeeRange: state.employeesFilter !== 'all' ? state.employeesFilter : undefined,
+            minSalary: isFilterSupported('salary') && state.salaryFilter !== 'all' ? parseInt(state.salaryFilter) : undefined,
+            employeeRange: isFilterSupported('employees') && state.employeesFilter !== 'all' ? state.employeesFilter : undefined,
         });
     };
 
@@ -115,16 +108,16 @@ export function SearchPage() {
             <Card className="p-6 rounded-2xl shadow-sm">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-semibold">対象サイト</h2>
-                    <span className="text-sm text-muted-foreground">{selectedSiteCount} サイト選択中</span>
+                    <span className="text-sm text-muted-foreground">1サイトを選択</span>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                     {(Object.keys(siteInfo) as SiteKey[]).map((site) => {
                         const info = siteInfo[site];
-                        const isSelected = state.selectedSites[site];
+                        const isSelected = state.selectedSite === site;
                         return (
                             <button
                                 key={site}
-                                onClick={() => toggleSite(site)}
+                                onClick={() => selectSite(site)}
                                 disabled={isScrapingRunning}
                                 className={cn(
                                     'relative p-4 rounded-xl border-2 transition-all',
@@ -243,7 +236,7 @@ export function SearchPage() {
                         </Button>
                         {state.selectedJobTypes.size > 0 && (
                             <div className="flex flex-wrap gap-1.5 mt-3">
-                                {jobTypeCategories
+                                {currentJobTypeCategories
                                     .filter(cat => state.selectedJobTypes.has(cat.id))
                                     .slice(0, 3)
                                     .map(cat => (
@@ -315,15 +308,18 @@ export function SearchPage() {
                     {/* 追加フィルター（給与・規模・更新日） */}
                     <div className="grid grid-cols-3 gap-4 pt-2 border-t border-border mt-4">
                         {/* 給与フィルター */}
-                        <div>
+                        <div className={cn(!isFilterSupported('salary') && 'opacity-50')}>
                             <label className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
                                 <Banknote className="h-4 w-4 text-green-500" />
                                 年収下限
+                                {!isFilterSupported('salary') && (
+                                    <span className="text-xs text-muted-foreground">(非対応)</span>
+                                )}
                             </label>
                             <Select
-                                value={state.salaryFilter}
+                                value={isFilterSupported('salary') ? state.salaryFilter : 'all'}
                                 onValueChange={setSalaryFilter}
-                                disabled={isScrapingRunning}
+                                disabled={isScrapingRunning || !isFilterSupported('salary')}
                             >
                                 <SelectTrigger className="h-10 rounded-xl">
                                     <SelectValue placeholder="指定なし" />
@@ -339,15 +335,18 @@ export function SearchPage() {
                         </div>
 
                         {/* 企業規模フィルター */}
-                        <div>
+                        <div className={cn(!isFilterSupported('employees') && 'opacity-50')}>
                             <label className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
                                 <Users className="h-4 w-4 text-blue-500" />
                                 企業規模
+                                {!isFilterSupported('employees') && (
+                                    <span className="text-xs text-muted-foreground">(非対応)</span>
+                                )}
                             </label>
                             <Select
-                                value={state.employeesFilter}
+                                value={isFilterSupported('employees') ? state.employeesFilter : 'all'}
                                 onValueChange={setEmployeesFilter}
-                                disabled={isScrapingRunning}
+                                disabled={isScrapingRunning || !isFilterSupported('employees')}
                             >
                                 <SelectTrigger className="h-10 rounded-xl">
                                     <SelectValue placeholder="指定なし" />
@@ -363,15 +362,18 @@ export function SearchPage() {
                         </div>
 
                         {/* 求人更新日フィルター */}
-                        <div>
+                        <div className={cn(!isFilterSupported('jobUpdated') && 'opacity-50')}>
                             <label className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
                                 <Calendar className="h-4 w-4 text-orange-500" />
                                 更新日
+                                {!isFilterSupported('jobUpdated') && (
+                                    <span className="text-xs text-muted-foreground">(非対応)</span>
+                                )}
                             </label>
                             <Select
-                                value={state.jobUpdatedFilter}
+                                value={isFilterSupported('jobUpdated') ? state.jobUpdatedFilter : 'all'}
                                 onValueChange={setJobUpdatedFilter}
-                                disabled={isScrapingRunning}
+                                disabled={isScrapingRunning || !isFilterSupported('jobUpdated')}
                             >
                                 <SelectTrigger className="h-10 rounded-xl">
                                     <SelectValue placeholder="指定なし" />
@@ -400,7 +402,6 @@ export function SearchPage() {
                     <Button
                         onClick={handleStartScraping}
                         className="w-full h-14 rounded-xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg hover:shadow-xl transition-all"
-                        disabled={selectedSiteCount === 0}
                     >
                         <Play className="h-5 w-5 mr-2" />
                         スクレイピング開始
@@ -431,6 +432,7 @@ export function SearchPage() {
             <JobTypeModal
                 isOpen={isJobTypeModalOpen}
                 onClose={() => setIsJobTypeModalOpen(false)}
+                categories={currentJobTypeCategories}
                 selectedJobTypes={state.selectedJobTypes}
                 toggleJobType={toggleJobType}
                 clearJobTypes={clearJobTypes}

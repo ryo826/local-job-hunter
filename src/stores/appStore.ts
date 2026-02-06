@@ -3,11 +3,7 @@ import type { Company, CompanyFilters, ScrapingProgress, ScrapingOptions, Update
 
 // スクレイピング設定の状態
 export interface ScrapingSettingsState {
-    selectedSites: {
-        mynavi: boolean;
-        rikunabi: boolean;
-        doda: boolean;
-    };
+    selectedSite: 'mynavi' | 'rikunabi' | 'doda';  // 単一選択に変更
     selectedPrefectures: string[];
     selectedJobTypes: string[];
     selectedRanks: BudgetRank[];

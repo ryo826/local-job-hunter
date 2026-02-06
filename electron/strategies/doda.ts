@@ -233,15 +233,12 @@ export class DodaStrategy implements ScrapingStrategy {
     ];
 
     // UI従業員数範囲 → dodaチェックボックス値のマッピング
-    // dodaの区分と完全一致しない場合は最も近い範囲を選択
+    // dodaの区分: value="1" = ～10名, value="2" = 11～100名, value="3" = 101～1000名, value="4" = 1001名～
     private readonly EMPLOYEE_RANGE_TO_DODA: Record<string, string[]> = {
         '0-10': ['1'],           // ～10名
-        '10-50': ['1', '2'],     // ～10名 + 11～100名（範囲が跨ぐ）
-        '50-100': ['2'],         // 11～100名
-        '100-300': ['3'],        // 101～1000名
-        '300-500': ['3'],        // 101～1000名
-        '500-1000': ['3'],       // 101～1000名
-        '1000-': ['4'],          // 1001名～
+        '11-100': ['2'],         // 11～100名
+        '101-1000': ['3'],       // 101～1000名
+        '1001-': ['4'],          // 1001名～
     };
 
     // 都道府県からdoda地域へのマッピング
@@ -568,20 +565,30 @@ export class DodaStrategy implements ScrapingStrategy {
         log('検索ボタンをクリック...');
         await page.waitForTimeout(1000);
 
-        const searchButton = page.locator('.search-sidebar__search-area button:has-text("検索する")');
-        if (await searchButton.count() === 0) {
-            log('検索ボタンが見つかりません');
-            return false;
+        // 複数のセレクターを試行
+        const buttonSelectors = [
+            'button.Button-module_button--green__Zirc1:has-text("検索する")',
+            '.search-sidebar__search-area button:has-text("検索する")',
+            'button[class*="Button-module_button--green"]:has-text("検索する")',
+            'button:has-text("検索する")',
+        ];
+
+        for (const selector of buttonSelectors) {
+            const searchButton = page.locator(selector).first();
+            if (await searchButton.count() > 0 && await searchButton.isVisible()) {
+                log(`検索ボタン発見: ${selector}`);
+                await searchButton.click();
+                await page.waitForTimeout(3000);
+                await page.waitForSelector('.jobCard-card', { timeout: 15000 }).catch(() => {
+                    log('Warning: Job card not found after filter');
+                });
+                log('フィルター適用完了');
+                return true;
+            }
         }
 
-        await searchButton.click();
-        await page.waitForTimeout(3000);
-        await page.waitForSelector('.jobCard-card', { timeout: 15000 }).catch(() => {
-            log('Warning: Job card not found after filter');
-        });
-
-        log('フィルター適用完了');
-        return true;
+        log('検索ボタンが見つかりません');
+        return false;
     }
 
     /**
@@ -1178,8 +1185,20 @@ export class DodaStrategy implements ScrapingStrategy {
                         continue;
                     }
 
+                    // 詳細ページURLを事前計算
+                    let detailUrl = fullUrl;
+                    if (!fullUrl.includes('-fm__jobdetail')) {
+                        if (fullUrl.includes('-tab__')) {
+                            detailUrl = fullUrl.replace(/-tab__[a-z]+\/?$/, '-tab__jd/-fm__jobdetail/');
+                        } else {
+                            detailUrl = fullUrl.replace(/\/?$/, '/-tab__jd/-fm__jobdetail/');
+                        }
+                        detailUrl = detailUrl.replace(/\/+/g, '/').replace(':/', '://');
+                    }
+
                     allJobs.push({
                         url: fullUrl,
+                        detailUrl,
                         companyName,
                         jobTitle,
                         rank,
@@ -1219,12 +1238,14 @@ export class DodaStrategy implements ScrapingStrategy {
         const logFn = log || ((msg: string) => console.log(`[Doda] ${msg}`));
 
         // リトライロジック
-        let retries = 2;
+        let retries = 1;
         while (retries >= 0) {
             try {
                 logFn(`Visiting: ${jobInfo.companyName}`);
 
-                await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                // 詳細ページに直接遷移（二重ナビゲーション回避）
+                const targetUrl = jobInfo.detailUrl || jobInfo.url;
+                await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
                 await page.waitForTimeout(randomDelay(500, 1000));
 
             // 404チェック
@@ -1234,22 +1255,9 @@ export class DodaStrategy implements ScrapingStrategy {
                 return null;
             }
 
-            // 詳細ページに遷移
-            let jobDetailUrl = jobInfo.url;
-            if (!jobInfo.url.includes('-fm__jobdetail')) {
-                if (jobInfo.url.includes('-tab__')) {
-                    jobDetailUrl = jobInfo.url.replace(/-tab__[a-z]+\/?$/, '-tab__jd/-fm__jobdetail/');
-                } else {
-                    jobDetailUrl = jobInfo.url.replace(/\/?$/, '/-tab__jd/-fm__jobdetail/');
-                }
-                jobDetailUrl = jobDetailUrl.replace(/\/+/g, '/').replace(':/', '://');
-
-                await page.goto(jobDetailUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                await page.waitForTimeout(randomDelay(300, 700));
-            }
-
-            // スクロールして会社概要を読み込み（高速化）
-            await page.evaluate(async () => {
+            // スクロールして会社概要を読み込み + 全フィールド一括抽出
+            const fields = await page.evaluate(async () => {
+                // スクロールして遅延読み込みをトリガー
                 const scrollStep = 1500;
                 let currentPosition = 0;
                 const maxScroll = document.body.scrollHeight;
@@ -1258,54 +1266,150 @@ export class DodaStrategy implements ScrapingStrategy {
                     window.scrollTo(0, currentPosition);
                     await new Promise(resolve => setTimeout(resolve, 30));
                 }
+                // 少し待ってからDOMを読む
+                await new Promise(resolve => setTimeout(resolve, 200));
+
+                // dt/dd構造から全ラベルを一括取得
+                const labelMap: Record<string, string> = {};
+                const dts = document.querySelectorAll('dt');
+                for (const dt of dts) {
+                    const label = dt.textContent?.trim();
+                    if (!label) continue;
+
+                    // 親要素からddを探す
+                    const parent = dt.parentElement;
+                    if (parent) {
+                        const dd = parent.querySelector('dd');
+                        if (dd) {
+                            labelMap[label] = dd.textContent?.trim().replace(/\s+/g, ' ') || '';
+                        }
+                    }
+                    // 隣接兄弟ddも試す
+                    if (!labelMap[label]) {
+                        const nextEl = dt.nextElementSibling;
+                        if (nextEl && nextEl.tagName === 'DD') {
+                            labelMap[label] = nextEl.textContent?.trim().replace(/\s+/g, ' ') || '';
+                        }
+                    }
+                }
+
+                // 企業URLを取得
+                let companyUrl: string | null = null;
+                // 方法1: 直接クラスのリンク
+                const directLink = document.querySelector('a.jobSearchDetail-companyOverview__link') as HTMLAnchorElement;
+                if (directLink?.href && !directLink.href.includes('doda.jp')) {
+                    companyUrl = directLink.href;
+                }
+                // 方法2: dt「企業URL」から
+                if (!companyUrl) {
+                    for (const dt of dts) {
+                        if (dt.textContent?.trim() === '企業URL') {
+                            const parent = dt.closest('[class*="columnItem"]');
+                            if (parent) {
+                                const link = parent.querySelector('a') as HTMLAnchorElement;
+                                if (link?.href && !link.href.includes('doda.jp')) {
+                                    companyUrl = link.href;
+                                    break;
+                                }
+                            }
+                            const dd = dt.nextElementSibling;
+                            if (dd?.tagName === 'DD') {
+                                const link = dd.querySelector('a') as HTMLAnchorElement;
+                                if (link?.href && !link.href.includes('doda.jp')) {
+                                    companyUrl = link.href;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                // 方法3: DescriptionList構造から
+                if (!companyUrl) {
+                    const columnItems = document.querySelectorAll('[class*="descriptionList__columnItem"]');
+                    for (const item of columnItems) {
+                        const dtEl = item.querySelector('dt');
+                        if (dtEl?.textContent?.trim() === '企業URL') {
+                            const link = item.querySelector('a') as HTMLAnchorElement;
+                            if (link?.href && !link.href.includes('doda.jp')) {
+                                companyUrl = link.href;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // 日付情報を取得
+                let updateDateStr: string | null = null;
+                let periodEndStr: string | null = null;
+                const dateSelectors = [
+                    '.jobSearchDetail-heading__publishingDate',
+                    '[class*="publishingDate"]',
+                    '.detailPublish',
+                ];
+                let dateText: string | null = null;
+                for (const sel of dateSelectors) {
+                    const el = document.querySelector(sel);
+                    if (el?.textContent) {
+                        dateText = el.textContent;
+                        break;
+                    }
+                }
+                if (dateText) {
+                    const periodRegex = /掲載予定期間[：:]\s*\d{4}\/\d{1,2}\/\d{1,2}[（(][月火水木金土日][）)]\s*[～〜ー-]\s*(\d{4}\/\d{1,2}\/\d{1,2})/;
+                    const updateRegex = /更新日[：:]\s*(\d{4}\/\d{1,2}\/\d{1,2})/;
+                    const periodMatch = dateText.match(periodRegex);
+                    const updateMatch = dateText.match(updateRegex);
+                    if (periodMatch) periodEndStr = periodMatch[1];
+                    if (updateMatch) updateDateStr = updateMatch[1];
+                }
+
+                return {
+                    companyUrl,
+                    address: labelMap['本社所在地'] || labelMap['所在地'] || null,
+                    industry: labelMap['事業概要'] || labelMap['事業内容'] || null,
+                    employees: labelMap['従業員数'] || null,
+                    establishment: labelMap['設立'] || null,
+                    representative: labelMap['代表者'] || null,
+                    revenue: labelMap['売上高'] || null,
+                    salary: labelMap['給与'] || labelMap['年収'] || null,
+                    updateDateStr,
+                    periodEndStr,
+                };
             });
-            await page.waitForTimeout(300);
 
-            // 企業情報を抽出
-            const companyUrl = await this.extractCompanyUrl(page, logFn);
-            const address = await this.extractDescriptionValue(page, '本社所在地') ||
-                await this.extractDescriptionValue(page, '所在地');
-            const industry = await this.extractDescriptionValue(page, '事業概要') ||
-                await this.extractDescriptionValue(page, '事業内容');
-            const employees = await this.extractDescriptionValue(page, '従業員数');
-            const establishment = await this.extractDescriptionValue(page, '設立');
-            const representative = await this.extractDescriptionValue(page, '代表者');
-            const revenue = await this.extractDescriptionValue(page, '売上高');
-            const salaryText = await this.extractDescriptionValue(page, '給与') ||
-                await this.extractDescriptionValue(page, '年収');
-
-            const normalizedAddress = this.normalizeAddress(address);
+            const normalizedAddress = this.normalizeAddress(fields.address || undefined);
             const cleanName = this.cleanCompanyName(jobInfo.companyName);
 
-            // 日付情報
-            const jobDates = await extractDodaJobDates(page);
+            // 日付パース
+            const updateDate = fields.updateDateStr ? parseJapaneseDate(fields.updateDateStr) : null;
+            const periodEnd = fields.periodEndStr ? parseJapaneseDate(fields.periodEndStr) : null;
 
             return {
                 source: this.source,
                 url: jobInfo.url,
                 company_name: cleanName,
                 job_title: jobInfo.jobTitle,
-                salary_text: normalizeSalary(salaryText),
-                representative,
-                establishment,
-                employees: normalizeEmployees(employees),
-                revenue,
+                salary_text: normalizeSalary(fields.salary || undefined),
+                representative: fields.representative || undefined,
+                establishment: fields.establishment || undefined,
+                employees: normalizeEmployees(fields.employees || undefined),
+                revenue: fields.revenue || undefined,
                 phone: undefined,
                 address: normalizedAddress,
                 area: normalizeArea(this.extractAreaFromAddress(normalizedAddress)),
-                homepage_url: companyUrl,
-                industry: normalizeIndustry(industry),
+                homepage_url: fields.companyUrl || undefined,
+                industry: normalizeIndustry(fields.industry || undefined),
                 scrape_status: 'step1_completed',
                     budget_rank: jobInfo.rank,
                     rank_confidence: jobInfo.rank === 'A' ? 0.9 : (jobInfo.rank === 'B' ? 0.7 : 0.6),
-                    job_page_updated_at: jobDates.updateDate?.toISOString() || null,
-                    job_page_end_date: jobDates.periodEnd?.toISOString() || null,
+                    job_page_updated_at: updateDate?.toISOString() || null,
+                    job_page_end_date: periodEnd?.toISOString() || null,
                 };
             } catch (error: any) {
                 retries--;
                 if (retries >= 0) {
-                    logFn(`Retry (${2 - retries}/2) for ${jobInfo.companyName}: ${error.message}`);
-                    await page.waitForTimeout(2000);
+                    logFn(`Retry for ${jobInfo.companyName}: ${error.message}`);
+                    await page.waitForTimeout(1000);
                 } else {
                     logFn(`Failed ${jobInfo.companyName}: ${error.message}`);
                     return null;
@@ -1341,7 +1445,7 @@ export class DodaStrategy implements ScrapingStrategy {
             let previousHeight = 0;
             let currentHeight = await page.evaluate(() => document.body.scrollHeight);
             let attempts = 0;
-            const maxAttempts = 5;
+            const maxAttempts = 2;
 
             while (previousHeight < currentHeight && attempts < maxAttempts) {
                 previousHeight = currentHeight;
@@ -1350,16 +1454,11 @@ export class DodaStrategy implements ScrapingStrategy {
                     window.scrollTo(0, document.body.scrollHeight);
                 });
 
-                await page.waitForTimeout(randomDelay(1000, 2000));
+                await page.waitForTimeout(randomDelay(500, 1000));
 
                 currentHeight = await page.evaluate(() => document.body.scrollHeight);
                 attempts++;
             }
-
-            // トップに戻る
-            await page.evaluate(() => window.scrollTo(0, 0));
-            await page.waitForTimeout(500);
-
         } catch (error) {
             log(`Error during scroll: ${error}`);
         }
@@ -1598,39 +1697,74 @@ export class DodaStrategy implements ScrapingStrategy {
         return searchUrl;
     }
 
-    // 総求人件数を取得（サイドバーフィルター適用後）
+    // 総求人件数を取得（URL直接アクセス版）
     async getTotalJobCount(page: Page, params: ScrapingParams): Promise<number | undefined> {
         const log = (msg: string) => console.log(`[Doda] ${msg}`);
 
         try {
+            // 検索URLを構築して直接アクセス
             const searchUrl = this.buildSearchUrl(params);
             log(`検索URL: ${searchUrl}`);
-            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-            await page.waitForTimeout(2000);
 
-            // サイドバーフィルターを適用（勤務地・職種・年収・従業員数など）
+            await page.setExtraHTTPHeaders({
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+                'Cache-Control': 'no-cache',
+                'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+            });
+
+            // ページにアクセス
+            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            log('ページにアクセス完了、要素を待機中...');
+
+            // 総件数要素が表示されるまで待機（複数のセレクターを試行）
+            const countSelectors = [
+                '.displayJobCount__totalNum',
+                '.search-sidebar__total-count__number',
+            ];
+
+            let foundSelector: string | null = null;
+            for (const selector of countSelectors) {
+                try {
+                    await page.waitForSelector(selector, { timeout: 10000 });
+                    foundSelector = selector;
+                    log(`セレクター ${selector} が見つかりました`);
+                    break;
+                } catch {
+                    log(`セレクター ${selector} は見つかりませんでした`);
+                }
+            }
+
+            if (!foundSelector) {
+                // 求人カードが表示されるまで待機してから再試行
+                log('件数要素が見つからないため、求人カードを待機...');
+                try {
+                    await page.waitForSelector('.jobCard-card', { timeout: 10000 });
+                    await page.waitForTimeout(2000);
+                } catch {
+                    log('求人カードも見つかりませんでした');
+                }
+            }
+
+            // サイドバーフィルターを適用（年収、従業員数など）
             const hasFilters = params.minSalary || params.employeeRange ||
                 (params.jobTypes && params.jobTypes.length > 0) ||
                 (params.prefectures && params.prefectures.length > 0);
             if (hasFilters) {
+                log('サイドバーフィルターを適用...');
                 await this.applySearchFilters(page, params, log);
                 await page.waitForTimeout(2000);
             }
 
-            // dodaの検索結果件数を取得
-            // セレクタ: .search-sidebar__total-count__number (カンマ区切り数字: 268,576)
-            // 別のセレクタ: .displayJobCount__totalNum
-            const selectors = [
-                '.search-sidebar__total-count__number',
-                '.displayJobCount__totalNum',
-            ];
-
-            for (const selector of selectors) {
+            // 総件数を取得
+            for (const selector of countSelectors) {
                 const element = page.locator(selector).first();
                 if (await element.count() > 0) {
                     const text = await element.textContent();
+                    log(`${selector} のテキスト: "${text}"`);
                     if (text) {
-                        // カンマを除去して数値に変換
                         const num = parseInt(text.replace(/,/g, ''), 10);
                         if (!isNaN(num)) {
                             log(`総件数: ${num.toLocaleString()}件`);
@@ -1640,6 +1774,29 @@ export class DodaStrategy implements ScrapingStrategy {
                 }
             }
 
+            // JavaScript経由で取得を試みる
+            log('JavaScript経由で件数取得を試行...');
+            const jsCount = await page.evaluate(() => {
+                const selectors = ['.displayJobCount__totalNum', '.search-sidebar__total-count__number'];
+                for (const sel of selectors) {
+                    const el = document.querySelector(sel);
+                    if (el && el.textContent) {
+                        return el.textContent.trim();
+                    }
+                }
+                return null;
+            });
+
+            if (jsCount) {
+                log(`JavaScript経由で取得: "${jsCount}"`);
+                const num = parseInt(jsCount.replace(/,/g, ''), 10);
+                if (!isNaN(num)) {
+                    log(`総件数: ${num.toLocaleString()}件`);
+                    return num;
+                }
+            }
+
+            log('総件数要素が見つかりませんでした');
             return undefined;
         } catch (error) {
             console.error('Failed to get total job count:', error);

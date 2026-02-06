@@ -29,10 +29,13 @@ if (process.platform === 'win32') {
         originalLog(output);
     };
 }
-import { initDB, companyRepository } from './database';
+import { initDB } from './database';
+import { SupabaseCompanyRepository } from './repositories/SupabaseCompanyRepository';
 import { ScrapingEngine } from './scraping-engine';
 import { UpdateEngine } from './update-engine';
 import { getExportService } from './services/ExportService';
+
+const companyRepository = new SupabaseCompanyRepository();
 
 // Load environment variables from .env file
 // In development: .env is in project root
@@ -122,16 +125,16 @@ app.on('window-all-closed', () => {
 
 // IPC Handlers
 ipcMain.handle('db:getCompanies', async (_event, filters) => {
-    return companyRepository.getAll(filters || {});
+    return await companyRepository.getAll(filters || {});
 });
 
 ipcMain.handle('db:getCompany', async (_event, id) => {
-    return companyRepository.getById(id);
+    return await companyRepository.getById(id);
 });
 
 ipcMain.handle('db:updateCompany', async (_event, id, updates) => {
     try {
-        companyRepository.update(id, updates);
+        await companyRepository.update(id, updates);
         return { success: true };
     } catch (error) {
         return { success: false, error: String(error) };
@@ -141,7 +144,7 @@ ipcMain.handle('db:updateCompany', async (_event, id, updates) => {
 // 会社を削除（複数対応）
 ipcMain.handle('db:deleteCompanies', async (_event: any, ids: number[]) => {
     try {
-        const deleted = companyRepository.deleteMany(ids);
+        const deleted = await companyRepository.deleteMany(ids);
         return { success: true, deleted };
     } catch (error) {
         return { success: false, error: String(error) };
@@ -214,7 +217,8 @@ ipcMain.handle('enrich:startPhoneLookup', async () => {
         }
 
         // 電話番号がない会社を取得
-        const companiesWithoutPhone = companyRepository.getAll({})
+        const allCompaniesForPhone = await companyRepository.getAll({});
+        const companiesWithoutPhone = allCompaniesForPhone
             .filter(c => !c.phone);
 
         if (companiesWithoutPhone.length === 0) {
@@ -237,7 +241,7 @@ ipcMain.handle('enrich:startPhoneLookup', async () => {
             const phone = await service.findCompanyPhone(company.company_name, company.address);
 
             if (phone) {
-                companyRepository.update(company.id, { phone });
+                await companyRepository.update(company.id, { phone });
                 updated++;
                 mainWindow?.webContents.send('enrich:log', `Found phone for ${company.company_name}: ${phone}`);
             } else {
@@ -254,7 +258,7 @@ ipcMain.handle('enrich:startPhoneLookup', async () => {
 
 // Get companies without phone numbers count
 ipcMain.handle('enrich:getStats', async () => {
-    const allCompanies = companyRepository.getAll({});
+    const allCompanies = await companyRepository.getAll({});
     const withPhone = allCompanies.filter(c => c.phone);
     const withoutPhone = allCompanies.filter(c => !c.phone);
 

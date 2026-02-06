@@ -23,7 +23,7 @@ export const regionPrefectures: Record<string, string[]> = {
 
 export const regions = Object.keys(regionPrefectures);
 
-// 職種カテゴリ（15統合カテゴリ）
+// 職種カテゴリ（15統合カテゴリ - doda用）
 export const jobTypeCategories = [
     { id: 'sales', name: '営業・販売・カスタマー対応', icon: '💼' },
     { id: 'planning', name: '企画・マーケティング・経営', icon: '📊' },
@@ -42,6 +42,61 @@ export const jobTypeCategories = [
     { id: 'public', name: '公務員・団体職員・その他', icon: '🏛️' },
 ];
 
+// マイナビ職種カテゴリ（16カテゴリ - jobTypeCodesのキーと直接一致）
+export const mynaviJobTypeCategories = [
+    { id: '営業', name: '営業', icon: '💼' },
+    { id: '販売・フード・アミューズメント', name: '販売・フード・アミューズメント', icon: '🛒' },
+    { id: '医療・福祉', name: '医療・福祉', icon: '🏥' },
+    { id: '企画・経営', name: '企画・経営', icon: '📊' },
+    { id: '建築・土木', name: '建築・土木', icon: '🏗️' },
+    { id: 'ITエンジニア', name: 'ITエンジニア', icon: '💻' },
+    { id: '電気・電子・機械・半導体', name: '電気・電子・機械・半導体', icon: '⚡' },
+    { id: '医薬・食品・化学・素材', name: '医薬・食品・化学・素材', icon: '🧪' },
+    { id: 'コンサルタント・金融・不動産専門職', name: 'コンサルタント・金融・不動産専門職', icon: '📈' },
+    { id: 'クリエイティブ', name: 'クリエイティブ', icon: '🎨' },
+    { id: '技能工・設備・配送・農林水産 他', name: '技能工・設備・配送・農林水産 他', icon: '🚚' },
+    { id: '公共サービス', name: '公共サービス', icon: '🏛️' },
+    { id: '管理・事務', name: '管理・事務', icon: '📝' },
+    { id: '美容・ブライダル・ホテル・交通', name: '美容・ブライダル・ホテル・交通', icon: '🛎️' },
+    { id: '保育・教育・通訳', name: '保育・教育・通訳', icon: '📚' },
+    { id: 'WEB・インターネット・ゲーム', name: 'WEB・インターネット・ゲーム', icon: '🌐' },
+];
+
+// リクナビNEXT職種カテゴリ（23カテゴリ - jobTypeCodesのキーと直接一致）
+export const rikunabiJobTypeCategories = [
+    { id: '営業・販売', name: '営業・販売', icon: '💼' },
+    { id: '経営・事業企画・人事・事務', name: '経営・事業企画・人事・事務', icon: '📊' },
+    { id: 'IT・Web・ゲームエンジニア', name: 'IT・Web・ゲームエンジニア', icon: '💻' },
+    { id: 'メディア・クリエイター', name: 'メディア・クリエイター', icon: '🎨' },
+    { id: 'エンジニアリング・設計開発', name: 'エンジニアリング・設計開発', icon: '⚡' },
+    { id: '製造・工場', name: '製造・工場', icon: '🏭' },
+    { id: 'マーケティング・広告・宣伝', name: 'マーケティング・広告・宣伝', icon: '📢' },
+    { id: '飲食・フードサービス', name: '飲食・フードサービス', icon: '🍽️' },
+    { id: '旅行・レジャー・イベント', name: '旅行・レジャー・イベント', icon: '✈️' },
+    { id: 'ビューティー・生活サービス', name: 'ビューティー・生活サービス', icon: '💅' },
+    { id: '倉庫・物流管理', name: '倉庫・物流管理', icon: '📦' },
+    { id: 'ドライバー・配送スタッフ', name: 'ドライバー・配送スタッフ', icon: '🚚' },
+    { id: '整備・修理', name: '整備・修理', icon: '🔧' },
+    { id: '清掃・美化', name: '清掃・美化', icon: '🧹' },
+    { id: '警備・保安', name: '警備・保安', icon: '🛡️' },
+    { id: '建設・土木・施工', name: '建設・土木・施工', icon: '🏗️' },
+    { id: '金融・財務・会計', name: '金融・財務・会計', icon: '💰' },
+    { id: '法務・法律', name: '法務・法律', icon: '⚖️' },
+    { id: '研究', name: '研究', icon: '🔬' },
+    { id: '医療・看護師・薬剤師', name: '医療・看護師・薬剤師', icon: '🏥' },
+    { id: '介護・福祉', name: '介護・福祉', icon: '🤝' },
+    { id: '保育士・教員・講師', name: '保育士・教員・講師', icon: '📚' },
+    { id: '農林漁業', name: '農林漁業', icon: '🌾' },
+];
+
+export type JobTypeCategory = typeof jobTypeCategories[number];
+
+export function getJobTypeCategoriesForSite(site: SiteKey): JobTypeCategory[] {
+    if (site === 'mynavi') return mynaviJobTypeCategories;
+    if (site === 'rikunabi') return rikunabiJobTypeCategories;
+    return jobTypeCategories;
+}
+
 // 給与フィルターオプション
 export const salaryOptions = [
     { value: 'all', label: '指定なし' },
@@ -54,16 +109,13 @@ export const salaryOptions = [
     { value: '1000', label: '1,000万円以上' },
 ];
 
-// 企業規模フィルターオプション（範囲指定）
+// 企業規模フィルターオプション（dodaの区分に合わせる）
 export const employeeOptions = [
     { value: 'all', label: '指定なし' },
-    { value: '0-10', label: '0〜10人' },
-    { value: '10-50', label: '10〜50人' },
-    { value: '50-100', label: '50〜100人' },
-    { value: '100-300', label: '100〜300人' },
-    { value: '300-500', label: '300〜500人' },
-    { value: '500-1000', label: '500〜1,000人' },
-    { value: '1000-', label: '1,000人以上' },
+    { value: '0-10', label: '〜10名' },
+    { value: '11-100', label: '11〜100名' },
+    { value: '101-1000', label: '101〜1,000名' },
+    { value: '1001-', label: '1,001名以上' },
 ];
 
 // 求人更新日フィルターオプション
@@ -107,3 +159,26 @@ export const siteInfo = {
 } as const;
 
 export type SiteKey = keyof typeof siteInfo;
+
+// サイトごとのフィルター対応状況
+export const siteFilterSupport: Record<SiteKey, {
+    salary: boolean;      // 年収フィルター
+    employees: boolean;   // 従業員数フィルター
+    jobUpdated: boolean;  // 更新日フィルター
+}> = {
+    mynavi: {
+        salary: true,
+        employees: true,
+        jobUpdated: true,
+    },
+    rikunabi: {
+        salary: false,     // リクナビは年収フィルター非対応
+        employees: false,  // リクナビは従業員数フィルター非対応
+        jobUpdated: false, // リクナビは更新日フィルター非対応
+    },
+    doda: {
+        salary: true,
+        employees: true,
+        jobUpdated: false, // dodaは更新日フィルター非対応（事後フィルターのみ）
+    },
+};

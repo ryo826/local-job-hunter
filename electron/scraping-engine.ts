@@ -1,9 +1,9 @@
 import { chromium, Browser, Page, BrowserContext } from 'playwright';
-import { companyRepository } from './database';
+import { SupabaseCompanyRepository } from './repositories/SupabaseCompanyRepository';
+import { SupabaseJobRepository } from './repositories/SupabaseJobRepository';
+import { supabase } from './supabase';
 import { ScrapingStrategy, ScrapingParams, CompanyData, BudgetRank, JobCardInfo } from './strategies/ScrapingStrategy';
-import { JobRepository } from './repositories/JobRepository';
 import { ScrapingLogRepository } from './repositories/ScrapingLogRepository';
-import { UpsertService } from './services/UpsertService';
 import { DataConverter } from './services/DataConverter';
 import { getGoogleMapsService } from './services/GoogleMapsService';
 import Database from 'better-sqlite3';
@@ -11,7 +11,7 @@ import path from 'path';
 import { app } from 'electron';
 
 // 並列処理の設定
-const DEFAULT_PARALLEL_WORKERS = 5;  // 同時に処理するジョブ数（デフォルト）
+const DEFAULT_PARALLEL_WORKERS = 10;  // 同時に処理するジョブ数（デフォルト）
 const PARALLEL_SOURCES = true;  // 複数サイトを同時にスクレイピング
 const DEBUG_MODE = process.env.NODE_ENV === 'development';  // デバッグモード
 
@@ -65,19 +65,20 @@ export class ScrapingEngine {
     private isRunning = false;
     private shouldStop = false;
     private db: Database.Database;
-    private jobRepo: JobRepository;
+    private companyRepo: SupabaseCompanyRepository;
+    private jobRepo: SupabaseJobRepository;
     private logRepo: ScrapingLogRepository;
-    private upsertService: UpsertService;
     // 確認待ち用
     private confirmationResolver: ((confirmed: boolean) => void) | null = null;
 
     constructor() {
-        // データベース接続を初期化
+        // ローカルSQLite（ログ用のみ）
         const dbPath = path.join(app.getPath('userData'), 'companies.db');
         this.db = new Database(dbPath);
-        this.jobRepo = new JobRepository(this.db);
         this.logRepo = new ScrapingLogRepository(this.db);
-        this.upsertService = new UpsertService(this.db);
+        // Supabase repositories
+        this.companyRepo = new SupabaseCompanyRepository();
+        this.jobRepo = new SupabaseJobRepository();
     }
 
     async start(
@@ -102,7 +103,6 @@ export class ScrapingEngine {
                     '--disable-web-security',
                     '--disable-features=IsolateOrigins,site-per-process',
                     '--disable-site-isolation-trials',
-                    '--disable-http2',  // HTTP/2プロトコルエラー対策
                 ]
             });
 
@@ -364,6 +364,21 @@ export class ScrapingEngine {
 
         try {
             const page = await context.newPage();
+            // ブラウザらしいHTTPヘッダーを設定
+            await page.setExtraHTTPHeaders({
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Upgrade-Insecure-Requests': '1',
+            });
 
             // Login if needed
             if (strategy.login) {
@@ -414,34 +429,40 @@ export class ScrapingEngine {
                 });
             };
 
+            // ローカルキャッシュ: 既存会社名を一括取得
+            const { data: existingCompanies } = await supabase
+                .from('companies')
+                .select('company_name');
+            const seqProcessedNames = new Set((existingCompanies || []).map((c: any) => c.company_name));
+
             // 会社データを処理する関数
             // ※フィルターは事前（検索条件・サイドバー）で適用済み
             const processCompany = async (company: CompanyData): Promise<void> => {
                 if (this.shouldStop) return;
 
-                // 重複チェック
-                const existsByName = companyRepository.existsByName(company.company_name);
-                if (existsByName) {
+                // 重複チェック（ローカルキャッシュで高速判定）
+                if (seqProcessedNames.has(company.company_name)) {
                     duplicateCount++;
                     log(`重複スキップ: ${company.company_name}`);
                     updateProgress();
                     return;
                 }
+                seqProcessedNames.add(company.company_name);
 
                 // 保存処理
                 newCount++;
-                companyRepository.safeUpsert(company as any);
+                await this.companyRepo.safeUpsert(company as any);
 
                 // 電話番号取得（バックグラウンドで実行）
                 if (!company.phone) {
                     const googleMapsService = getGoogleMapsService();
                     if (googleMapsService) {
                         googleMapsService.findCompanyPhone(company.company_name, company.address)
-                            .then(phone => {
+                            .then(async phone => {
                                 if (phone) {
-                                    const savedCompany = companyRepository.getByName(company.company_name);
+                                    const savedCompany = await this.companyRepo.getByName(company.company_name);
                                     if (savedCompany) {
-                                        companyRepository.update(savedCompany.id, { phone });
+                                        await this.companyRepo.update(savedCompany.id, { phone });
                                     }
                                 }
                             })
@@ -452,7 +473,7 @@ export class ScrapingEngine {
                 // Job型に変換して保存
                 try {
                     const job = DataConverter.companyDataToJob(company);
-                    const isNew = this.upsertService.upsert(job);
+                    const isNew = await this.jobRepo.upsert(job);
                     if (isNew) {
                         newJobs++;
                     } else {
@@ -572,77 +593,58 @@ export class ScrapingEngine {
 
         try {
             const mainPage = await mainContext.newPage();
+            // ブラウザらしいHTTPヘッダーを設定
+            await mainPage.setExtraHTTPHeaders({
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Upgrade-Insecure-Requests': '1',
+            });
 
-            // Step 0: 検索結果の総件数を取得（URL収集前）
-            log('検索結果の件数を確認中...');
+            // Step 1: URL収集（総件数もcollectJobUrls内で取得）
+            log('求人URLを収集中...');
             onProgress({
                 current: 0, total: 0, newCount: 0, duplicateCount: 0,
                 source: strategy.source,
-                status: '検索結果の件数を確認中...',
+                status: '求人URLを収集中...',
             });
 
-            // 総件数を取得
-            if (strategy.getTotalJobCount) {
-                totalJobs = await strategy.getTotalJobCount(mainPage, params);
-                if (totalJobs !== undefined) {
-                    log(`検索結果: ${totalJobs.toLocaleString()}件`);
-                }
-            }
+            // collectJobUrlsのonTotalCountコールバックで総件数を取得
+            const onTotalCount = (count: number) => {
+                totalJobs = count;
+                log(`検索結果: ${count.toLocaleString()}件`);
+                onProgress({
+                    current: 0, total: 0, newCount: 0, duplicateCount: 0,
+                    source: strategy.source,
+                    status: `検索結果: ${count.toLocaleString()}件`,
+                    totalJobs: count,
+                });
+            };
+
+            let jobUrls = await strategy.collectJobUrls(mainPage, params, { onLog: log, onTotalCount });
+            log(`${jobUrls.length}件のURLを収集完了（総件数: ${totalJobs?.toLocaleString() ?? '不明'}件）`);
 
             // 0件の場合は早期終了
-            if (totalJobs === 0) {
+            if (totalJobs === 0 || jobUrls.length === 0) {
                 log('該当する求人が0件のため、スクレイピングを終了します');
                 await mainPage.close();
                 await mainContext.close();
                 return;
             }
 
-            // ★ 確認ステップ1: 検索結果の総件数を確認
-            log(`確認待ち: ${totalJobs?.toLocaleString() ?? '不明'}件の検索結果があります。URL収集を開始しますか？`);
-            onProgress({
-                current: 0,
-                total: 0,
-                newCount: 0,
-                duplicateCount: 0,
-                source: strategy.source,
-                status: `${totalJobs?.toLocaleString() ?? '不明'}件の検索結果。URL収集を開始しますか？`,
-                totalJobs: totalJobs,
-                waitingConfirmation: true,
-            });
-
-            // 確認待ち
-            const confirmedFirst = await new Promise<boolean>((resolve) => {
-                this.confirmationResolver = resolve;
-            });
-
-            if (!confirmedFirst || this.shouldStop) {
-                log('ユーザーによりキャンセルされました');
-                await mainPage.close();
-                await mainContext.close();
-                return;
-            }
-
-            log('確認OK、URL収集を開始します');
-
-            // Step 1: URL収集
-            log('Step 1: 求人URLを収集中...');
-            onProgress({
-                current: 0, total: 0, newCount: 0, duplicateCount: 0,
-                source: strategy.source,
-                status: '求人URLを収集中...',
-                totalJobs: totalJobs,
-            });
-
-            let jobUrls = await strategy.collectJobUrls(mainPage, params, { onLog: log });
-            log(`${jobUrls.length}件のURLを収集完了`);
+            // Cookie継承なし: 各ワーカーは独立した新規訪問者として動作
+            // （同一セッションの共有はレート制限の原因になる）
 
             await mainPage.close();
             await mainContext.close();
-
-            if (jobUrls.length === 0) {
-                log('収集されたURLがありません');
-                return;
-            }
 
             // ★ ランクフィルターを詳細ページ訪問前に適用（最適化）
             if (options.rankFilter && options.rankFilter.length > 0) {
@@ -660,8 +662,53 @@ export class ScrapingEngine {
                 log(`フィルター後: ${jobUrls.length}件の詳細ページを訪問`);
             }
 
-            // ★ 確認ステップ2: URL収集後、詳細取得前に確認
-            log(`確認待ち: ${jobUrls.length}件の詳細を取得しますか？`);
+            // ★ 会社名で重複排除（同じ会社の複数求人は最上位ランクの1件だけ残す）
+            {
+                const beforeDedup = jobUrls.length;
+                const seen = new Map<string, JobCardInfo>();
+                for (const job of jobUrls) {
+                    const name = job.companyName;
+                    if (!name) continue;
+                    const existing = seen.get(name);
+                    if (!existing) {
+                        seen.set(name, job);
+                    } else {
+                        // より上位のランク（A>B>C）または上位の表示順を優先
+                        const rankOrder: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2 };
+                        const existingRank = rankOrder[existing.rank || 'C'] ?? 2;
+                        const newRank = rankOrder[job.rank || 'C'] ?? 2;
+                        if (newRank < existingRank) {
+                            seen.set(name, job);
+                        }
+                    }
+                }
+                jobUrls = Array.from(seen.values());
+                const dedupCount = beforeDedup - jobUrls.length;
+                if (dedupCount > 0) {
+                    log(`会社名で重複排除: ${dedupCount}件スキップ (${beforeDedup}件 → ${jobUrls.length}件)`);
+                    skippedCount += dedupCount;
+                }
+            }
+
+            // ★ DB既存データを除外（一括取得で高速化）
+            const beforeDbCheck = jobUrls.length;
+            const { data: existingCompanies } = await supabase
+                .from('companies')
+                .select('company_name');
+            const existingNames = new Set((existingCompanies || []).map((c: any) => c.company_name));
+            jobUrls = jobUrls.filter(job => !existingNames.has(job.companyName));
+            const dbDupCount = beforeDbCheck - jobUrls.length;
+            if (dbDupCount > 0) {
+                log(`DB既存データ除外: ${dbDupCount}件スキップ (${beforeDbCheck}件 → ${jobUrls.length}件)`);
+                duplicateCount += dbDupCount;
+            }
+            if (jobUrls.length === 0) {
+                log('全件がDB登録済みのため、スクレイピングを終了します');
+                return;
+            }
+
+            // ★ 確認ステップ: URL収集後、詳細取得前に確認
+            log(`確認待ち: ${jobUrls.length}件の詳細を取得しますか？（総件数: ${totalJobs?.toLocaleString() ?? '不明'}件）`);
             onProgress({
                 current: 0,
                 total: jobUrls.length,
@@ -685,10 +732,29 @@ export class ScrapingEngine {
 
             log('確認OK、スクレイピングを続行します');
 
+            // 確認待ちフラグをクリアしてUIを更新（ワーカー起動前に進捗表示に切り替え）
+            onProgress({
+                current: 0,
+                total: jobUrls.length,
+                newCount: 0,
+                duplicateCount: 0,
+                source: strategy.source,
+                status: `並列スクレイピング準備中... (${parallelWorkers}ページ)`,
+                totalJobs: totalJobs ?? jobUrls.length,
+                startTime: scrapeStartTime,
+            });
+
             // Step 2: 並列で詳細ページをスクレイピング
             log(`Step 2: ${parallelWorkers}ページ並列で詳細をスクレイピング...`);
 
-            // 進捗更新
+            // 事前フィルターのカウントを保存し、ワーカーフェーズ用にリセット
+            const preFilterSkipped = skippedCount;
+            const preFilterDuplicate = duplicateCount;
+            skippedCount = 0;
+            duplicateCount = 0;
+            newCount = 0;
+
+            // 進捗更新（ワーカーフェーズのみのカウント）
             const updateProgress = () => {
                 const elapsedMs = Date.now() - scrapeStartTime;
                 const processed = newCount + duplicateCount + skippedCount;
@@ -709,31 +775,34 @@ export class ScrapingEngine {
                 });
             };
 
+            // ローカルキャッシュ: 処理済み会社名（Supabaseクエリ削減）
+            const processedNames = new Set(existingNames);
+
             // 会社データを処理する関数
             // ※フィルターは事前（検索条件・サイドバー）で適用済み
             const processCompany = async (company: CompanyData): Promise<void> => {
-                // 重複チェック
-                const existsByName = companyRepository.existsByName(company.company_name);
-                if (existsByName) {
+                // 重複チェック（ローカルキャッシュで高速判定）
+                if (processedNames.has(company.company_name)) {
                     duplicateCount++;
                     updateProgress();
                     return;
                 }
+                processedNames.add(company.company_name);
 
                 // 保存
                 newCount++;
-                companyRepository.safeUpsert(company as any);
+                await this.companyRepo.safeUpsert(company as any);
 
                 // 電話番号取得（バックグラウンド）
                 if (!company.phone) {
                     const googleMapsService = getGoogleMapsService();
                     if (googleMapsService) {
                         googleMapsService.findCompanyPhone(company.company_name, company.address)
-                            .then(phone => {
+                            .then(async phone => {
                                 if (phone) {
-                                    const savedCompany = companyRepository.getByName(company.company_name);
+                                    const savedCompany = await this.companyRepo.getByName(company.company_name);
                                     if (savedCompany) {
-                                        companyRepository.update(savedCompany.id, { phone });
+                                        await this.companyRepo.update(savedCompany.id, { phone });
                                     }
                                 }
                             })
@@ -744,7 +813,7 @@ export class ScrapingEngine {
                 // Job型に変換して保存
                 try {
                     const job = DataConverter.companyDataToJob(company);
-                    this.upsertService.upsert(job);
+                    await this.jobRepo.upsert(job);
                 } catch (error) {
                     console.error(`Failed to convert/save job:`, error);
                 }
@@ -762,21 +831,46 @@ export class ScrapingEngine {
                     locale: 'ja-JP',
                     timezoneId: 'Asia/Tokyo',
                     viewport: { width: 1920, height: 1080 },
+                    ignoreHTTPSErrors: true,
+                    bypassCSP: true,
                 });
+                // Cookie注入なし（独立セッション）
                 const page = await ctx.newPage();
+                // doda対策: ブラウザらしいHTTPヘッダーを設定
+                await page.setExtraHTTPHeaders({
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache',
+                    'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131"',
+                    'Sec-Ch-Ua-Mobile': '?0',
+                    'Sec-Ch-Ua-Platform': '"Windows"',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Upgrade-Insecure-Requests': '1',
+                });
                 workerContexts.push(ctx);
                 workerPages.push(page);
             }
 
-            // ジョブキュー
+            // ジョブキュー（事前dedup + DBチェック済みのためシンプルなindex++）
             let jobIndex = 0;
-            const getNextJob = () => {
-                if (jobIndex >= jobUrls.length) return null;
-                return jobUrls[jobIndex++];
+
+            const getNextJob = (): JobCardInfo | null => {
+                if (jobIndex < jobUrls.length) {
+                    return jobUrls[jobIndex++];
+                }
+                return null;
             };
 
-            // 並列ワーカー
+            // 並列ワーカー（開始をずらして同時リクエストを回避）
             const workerPromises = workerPages.map(async (page, workerIdx) => {
+                // ワーカーごとに1秒ずらして開始（同時リクエストによるブロック回避）
+                if (workerIdx > 0) {
+                    await new Promise(resolve => setTimeout(resolve, workerIdx * 1000));
+                }
                 while (!this.shouldStop) {
                     const jobInfo = getNextJob();
                     if (!jobInfo) break;
@@ -803,6 +897,9 @@ export class ScrapingEngine {
                         skippedCount++;
                         updateProgress();
                     }
+
+                    // レート制限回避: リクエスト間に短いインターバル
+                    await new Promise(resolve => setTimeout(resolve, 500));
                 }
             });
 
@@ -818,7 +915,9 @@ export class ScrapingEngine {
             }
 
             const durationMs = Date.now() - startTime;
-            log(`完了: ${newCount}件新規, ${duplicateCount}件重複, ${skippedCount}件スキップ (${Math.round(durationMs / 1000)}秒)`);
+            const totalSkipped = preFilterSkipped + skippedCount;
+            const totalDuplicate = preFilterDuplicate + duplicateCount;
+            log(`完了: ${newCount}件新規, ${totalDuplicate}件重複, ${totalSkipped}件スキップ (${Math.round(durationMs / 1000)}秒)`);
 
             // ログ記録
             this.logRepo.insert({
