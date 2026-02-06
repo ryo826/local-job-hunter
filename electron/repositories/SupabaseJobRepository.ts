@@ -4,45 +4,54 @@ import { JobFilters } from '../../src/shared/types/ScrapingLog';
 
 export class SupabaseJobRepository {
     async getAll(filters: JobFilters = {}): Promise<Job[]> {
-        let query = supabase.from('jobs').select('*');
+        const PAGE_SIZE = 1000;
+        let allData: any[] = [];
+        let from = 0;
 
-        if (filters.source && filters.source !== 'all') {
-            query = query.eq('source', filters.source);
-        }
+        while (true) {
+            let query = supabase.from('jobs').select('*');
 
-        if (filters.search) {
-            const term = `%${filters.search}%`;
-            query = query.or(
-                `company_name.ilike.${term},title.ilike.${term},description.ilike.${term},location_summary.ilike.${term}`
-            );
-        }
+            if (filters.source && filters.source !== 'all') {
+                query = query.eq('source', filters.source);
+            }
 
-        if (filters.salaryMin !== undefined) {
-            query = query.gte('salary_min', filters.salaryMin);
-        }
+            if (filters.search) {
+                const term = `%${filters.search}%`;
+                query = query.or(
+                    `company_name.ilike.${term},title.ilike.${term},description.ilike.${term},location_summary.ilike.${term}`
+                );
+            }
 
-        if (filters.salaryMax !== undefined) {
-            query = query.lte('salary_max', filters.salaryMax);
-        }
+            if (filters.salaryMin !== undefined) {
+                query = query.gte('salary_min', filters.salaryMin);
+            }
 
-        if (filters.location) {
-            query = query.ilike('location_summary', `%${filters.location}%`);
-        }
+            if (filters.salaryMax !== undefined) {
+                query = query.lte('salary_max', filters.salaryMax);
+            }
 
-        if (filters.isActive !== undefined) {
-            query = query.eq('is_active', filters.isActive);
-        }
+            if (filters.location) {
+                query = query.ilike('location_summary', `%${filters.location}%`);
+            }
 
-        query = query.order('scraped_at', { ascending: false });
+            if (filters.isActive !== undefined) {
+                query = query.eq('is_active', filters.isActive);
+            }
 
-        const { data, error } = await query;
-        if (error) {
-            console.error('[SupabaseJobRepo] getAll error:', error);
-            return [];
+            query = query.order('scraped_at', { ascending: false }).range(from, from + PAGE_SIZE - 1);
+
+            const { data, error } = await query;
+            if (error) {
+                console.error('[SupabaseJobRepo] getAll error:', error);
+                break;
+            }
+            allData = allData.concat(data || []);
+            if (!data || data.length < PAGE_SIZE) break;
+            from += PAGE_SIZE;
         }
 
         // Supabase returns JSONB natively, but we need to map snake_case to camelCase
-        return (data || []).map(row => this.deserialize(row));
+        return allData.map(row => this.deserialize(row));
     }
 
     async getById(id: string): Promise<Job | null> {
@@ -143,14 +152,23 @@ export class SupabaseJobRepository {
             .select('*', { count: 'exact', head: true })
             .eq('is_active', true);
 
-        // By source (get all active jobs and group in JS)
-        const { data: sourceData } = await supabase
-            .from('jobs')
-            .select('source')
-            .eq('is_active', true);
+        // By source (paginated fetch of all active jobs, group in JS)
+        let allSourceData: any[] = [];
+        let srcFrom = 0;
+        const SRC_PAGE = 1000;
+        while (true) {
+            const { data: sourceData } = await supabase
+                .from('jobs')
+                .select('source')
+                .eq('is_active', true)
+                .range(srcFrom, srcFrom + SRC_PAGE - 1);
+            allSourceData = allSourceData.concat(sourceData || []);
+            if (!sourceData || sourceData.length < SRC_PAGE) break;
+            srcFrom += SRC_PAGE;
+        }
 
         const sourceCounts = new Map<string, number>();
-        for (const row of sourceData || []) {
+        for (const row of allSourceData) {
             const s = row.source;
             sourceCounts.set(s, (sourceCounts.get(s) || 0) + 1);
         }

@@ -207,8 +207,8 @@ export class RikunabiStrategy implements ScrapingStrategy {
     readonly source = 'rikunabi';
 
     // レート制限設定
-    private readonly REQUEST_INTERVAL = 3000;  // 3秒
-    private readonly PAGE_INTERVAL = 5000;     // 5秒
+    private readonly REQUEST_INTERVAL = 1000;  // 1秒
+    private readonly PAGE_INTERVAL = 1500;     // 1.5秒
 
     async *scrape(page: Page, params: ScrapingParams, callbacks?: ScrapingCallbacks): AsyncGenerator<CompanyData> {
         const { keywords, prefectures, jobTypes } = params;
@@ -820,7 +820,7 @@ export class RikunabiStrategy implements ScrapingStrategy {
                 });
 
                 await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                await page.waitForTimeout(randomDelay(2000, 3000));
+                await page.waitForTimeout(randomDelay(500, 1000));
                 pageLoaded = true;
             } catch (error: any) {
                 retries--;
@@ -1011,7 +1011,7 @@ export class RikunabiStrategy implements ScrapingStrategy {
                     } else {
                         try {
                             await nextButton.click();
-                            await page.waitForTimeout(randomDelay(2000, 3000));
+                            await page.waitForTimeout(randomDelay(500, 1000));
                         } catch (error) {
                             hasNext = false;
                         }
@@ -1043,7 +1043,7 @@ export class RikunabiStrategy implements ScrapingStrategy {
             try {
                 logFn(`Visiting: ${jobInfo.companyName || jobInfo.url}`);
 
-                await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+                await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 8000 });
                 await page.waitForTimeout(randomDelay(500, 1000));
 
             // 全フィールドを1回のpage.evaluate()で一括抽出

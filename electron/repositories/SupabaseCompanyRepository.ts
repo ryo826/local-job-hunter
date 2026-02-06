@@ -3,27 +3,37 @@ import type { Company, CompanyFilters } from '../../src/types';
 
 export class SupabaseCompanyRepository {
     async getAll(filters: CompanyFilters): Promise<Company[]> {
-        let query = supabase.from('companies').select('*');
+        const PAGE_SIZE = 1000;
+        let allData: any[] = [];
+        let from = 0;
 
-        if (filters.status && filters.status !== 'all') {
-            query = query.eq('status', filters.status);
+        while (true) {
+            let query = supabase.from('companies').select('*');
+
+            if (filters.status && filters.status !== 'all') {
+                query = query.eq('status', filters.status);
+            }
+
+            if (filters.search) {
+                const term = `%${filters.search}%`;
+                query = query.or(
+                    `company_name.ilike.${term},address.ilike.${term},note.ilike.${term},ai_summary.ilike.${term},ai_tags.ilike.${term}`
+                );
+            }
+
+            query = query.order('created_at', { ascending: false }).range(from, from + PAGE_SIZE - 1);
+
+            const { data, error } = await query;
+            if (error) {
+                console.error('[SupabaseCompanyRepo] getAll error:', error);
+                break;
+            }
+            allData = allData.concat(data || []);
+            if (!data || data.length < PAGE_SIZE) break;
+            from += PAGE_SIZE;
         }
 
-        if (filters.search) {
-            const term = `%${filters.search}%`;
-            query = query.or(
-                `company_name.ilike.${term},address.ilike.${term},note.ilike.${term},ai_summary.ilike.${term},ai_tags.ilike.${term}`
-            );
-        }
-
-        query = query.order('created_at', { ascending: false });
-
-        const { data, error } = await query;
-        if (error) {
-            console.error('[SupabaseCompanyRepo] getAll error:', error);
-            return [];
-        }
-        return data as Company[];
+        return allData as Company[];
     }
 
     async getById(id: number): Promise<Company | null> {

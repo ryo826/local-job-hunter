@@ -268,8 +268,8 @@ export class MynaviStrategy implements ScrapingStrategy {
     readonly source = 'mynavi';
 
     // レート制限設定
-    private readonly REQUEST_INTERVAL = 3000;  // 3秒
-    private readonly PAGE_INTERVAL = 5000;     // 5秒
+    private readonly REQUEST_INTERVAL = 1000;  // 1秒
+    private readonly PAGE_INTERVAL = 1500;     // 1.5秒
 
     async *scrape(page: Page, params: ScrapingParams, callbacks?: ScrapingCallbacks): AsyncGenerator<CompanyData> {
         const { onLog, onTotalCount } = callbacks || {};
@@ -286,7 +286,7 @@ export class MynaviStrategy implements ScrapingStrategy {
 
         try {
             await page.goto(searchUrl, { waitUntil: 'networkidle', timeout: 30000 });
-            await page.waitForTimeout(randomDelay(2000, 5000)); // 2-5秒のランダム待機
+            await page.waitForTimeout(randomDelay(500, 1000)); // 2-5秒のランダム待機
         } catch (error) {
             log(`Error loading search page: ${error}`);
             return;
@@ -473,7 +473,7 @@ export class MynaviStrategy implements ScrapingStrategy {
                     await page.waitForTimeout(this.REQUEST_INTERVAL); // レート制限
 
                     await page.goto(jobInfo.url, { waitUntil: 'networkidle', timeout: 30000 });
-                    await page.waitForTimeout(randomDelay(2000, 5000)); // 2-5秒待機
+                    await page.waitForTimeout(randomDelay(500, 1000)); // 2-5秒待機
 
                     // 404チェック
                     const is404 = await page.locator('text=/404|ページが見つかりません|お探しのページは|掲載が終了/i').count() > 0;
@@ -568,7 +568,7 @@ export class MynaviStrategy implements ScrapingStrategy {
             // 検索結果ページに戻る
             log('Returning to search results...');
             await page.goto(currentSearchUrl, { waitUntil: 'networkidle', timeout: 30000 });
-            await page.waitForTimeout(randomDelay(2000, 4000));
+            await page.waitForTimeout(randomDelay(500, 1000));
 
             // 次ページボタンを探す
             const nextButton = page.locator('a:has-text("次へ"), .pager__next a, a[rel="next"], [class*="pagination"] a:has-text("次"), a.next').first();
@@ -612,12 +612,12 @@ export class MynaviStrategy implements ScrapingStrategy {
                         }
                         log(`Navigating to next page: ${currentSearchUrl}`);
                         await page.goto(currentSearchUrl, { waitUntil: 'networkidle', timeout: 30000 });
-                        await page.waitForTimeout(randomDelay(3000, 5000));
+                        await page.waitForTimeout(randomDelay(800, 1500));
                     } else {
                         // hrefがない場合はクリック
                         await nextButton.click();
                         await page.waitForLoadState('networkidle');
-                        await page.waitForTimeout(randomDelay(3000, 5000));
+                        await page.waitForTimeout(randomDelay(800, 1500));
                         currentSearchUrl = page.url();
                     }
                 } catch (error) {
@@ -977,7 +977,7 @@ export class MynaviStrategy implements ScrapingStrategy {
                 });
 
                 await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                await page.waitForTimeout(randomDelay(1000, 2000));
+                await page.waitForTimeout(randomDelay(300, 600));
 
                 // カードセレクターを取得
                 cardSelector = await waitForAnySelector(page, JOB_CARD_SELECTORS, 10000, log);
@@ -1155,7 +1155,7 @@ export class MynaviStrategy implements ScrapingStrategy {
                 if (await nextButton.count() > 0 && await nextButton.isVisible()) {
                     try {
                         await nextButton.click();
-                        await page.waitForTimeout(randomDelay(1500, 2500));
+                        await page.waitForTimeout(randomDelay(500, 1000));
                     } catch (error) {
                         hasNext = false;
                     }
@@ -1186,47 +1186,27 @@ export class MynaviStrategy implements ScrapingStrategy {
     async scrapeJobDetail(page: Page, jobInfo: JobCardInfo, log?: (msg: string) => void): Promise<CompanyData | null> {
         const logFn = log || ((msg: string) => console.log(`[Mynavi] ${msg}`));
 
-        // リトライロジック
-        let retries = 1;
-        while (retries >= 0) {
-            try {
-                logFn(`Visiting: ${jobInfo.companyName}`);
+        // リトライなし（速度重視: タイムアウト時は即スキップ）
+        try {
+            logFn(`Visiting: ${jobInfo.companyName}`);
 
-                await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-                await page.waitForTimeout(randomDelay(300, 700));
+            await page.goto(jobInfo.url, { waitUntil: 'domcontentloaded', timeout: 8000 });
 
-                // 404/掲載終了チェック（複数パターン）
-                const pageContent = await page.content();
-                const is404 = pageContent.includes('404') ||
-                    pageContent.includes('ページが見つかりません') ||
-                    pageContent.includes('お探しのページは') ||
-                    pageContent.includes('掲載が終了') ||
-                    pageContent.includes('募集を終了') ||
-                    pageContent.includes('掲載期間が終了');
-
-                if (is404) {
-                    logFn('Page not found or job expired, skipping');
-                    return null;
-                }
-
-                // 会社名（必須）
-                let companyName = jobInfo.companyName;
-                if (!companyName) {
-                    const pageCompanyEl = page.locator('.companyName, [class*="company-name"], h1').first();
-                    if (await pageCompanyEl.count() > 0) {
-                        companyName = (await pageCompanyEl.textContent())?.trim() || '';
-                    }
-                }
-
-                // 会社名がない場合はスキップ
-                if (!companyName) {
-                    logFn('No company name found, skipping');
-                    return null;
-                }
-
-                // 企業情報を1回のpage.evaluate()で一括抽出
+                // 404チェック + 企業情報抽出を1回のevaluateで実行（ラウンドトリップ削減）
                 const fields = await page.evaluate(() => {
+                    // 404/掲載終了チェック
+                    const bodyText = document.body?.innerText || '';
+                    if (bodyText.includes('ページが見つかりません') ||
+                        bodyText.includes('お探しのページは') ||
+                        bodyText.includes('掲載が終了') ||
+                        bodyText.includes('募集を終了') ||
+                        bodyText.includes('掲載期間が終了') ||
+                        document.title.includes('404')) {
+                        return null; // 404
+                    }
+
                     const result: Record<string, string | null> = {
+                        companyName: null,
                         companyUrl: null,
                         address: null,
                         industry: null,
@@ -1235,6 +1215,12 @@ export class MynaviStrategy implements ScrapingStrategy {
                         representative: null,
                         salary: null,
                     };
+
+                    // 会社名フォールバック
+                    const companyEl = document.querySelector('.companyName, [class*="company-name"], h1');
+                    if (companyEl) {
+                        result.companyName = companyEl.textContent?.trim() || null;
+                    }
 
                     // th/td構造（jobOfferTable）から一括取得
                     const rows = document.querySelectorAll('tr');
@@ -1248,7 +1234,6 @@ export class MynaviStrategy implements ScrapingStrategy {
                             return (textEl?.textContent || td.textContent)?.trim() || '';
                         };
 
-                        // 企業URL: リンクのテキスト内容を優先
                         if (label.includes('企業ホームページ') || label === '企業HP' || label === 'HP' || label === 'ホームページ' || label === 'URL' || label === '公式サイト' || label === 'WEBサイト') {
                             const link = td.querySelector('a') as HTMLAnchorElement | null;
                             if (link) {
@@ -1326,6 +1311,19 @@ export class MynaviStrategy implements ScrapingStrategy {
                     return result;
                 });
 
+                // 404の場合
+                if (!fields) {
+                    logFn('Page not found or job expired, skipping');
+                    return null;
+                }
+
+                // 会社名（必須）
+                const companyName = jobInfo.companyName || fields.companyName;
+                if (!companyName) {
+                    logFn('No company name found, skipping');
+                    return null;
+                }
+
                 const normalizedAddress = normalizeAddressUtil(fields.address || undefined);
                 const cleanName = cleanCompanyNameUtil(companyName);
 
@@ -1349,17 +1347,9 @@ export class MynaviStrategy implements ScrapingStrategy {
                     job_page_updated_at: null,
                     job_page_end_date: null,
                 };
-            } catch (error: any) {
-                retries--;
-                if (retries >= 0) {
-                    logFn(`Retry for ${jobInfo.companyName}: ${error.message}`);
-                    await page.waitForTimeout(1000);
-                } else {
-                    logFn(`Failed ${jobInfo.companyName}: ${error.message}`);
-                    return null;
-                }
-            }
+        } catch (error: any) {
+            logFn(`Failed ${jobInfo.companyName}: ${error.message}`);
+            return null;
         }
-        return null;
     }
 }

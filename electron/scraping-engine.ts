@@ -10,10 +10,28 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { app } from 'electron';
 
-// 並列処理の設定
-const DEFAULT_PARALLEL_WORKERS = 10;  // 同時に処理するジョブ数（デフォルト）
+// 並列処理の設定（サイト別最適化）
+const PARALLEL_WORKERS: Record<string, number> = {
+    mynavi: 15,    // mynaviは比較的寛容
+    rikunabi: 12,  // rikunabiも並列耐性あり
+    doda: 8,       // dodaはブロック検知が厳しめ
+};
+const DEFAULT_PARALLEL_WORKERS = 10;
 const PARALLEL_SOURCES = true;  // 複数サイトを同時にスクレイピング
 const DEBUG_MODE = process.env.NODE_ENV === 'development';  // デバッグモード
+
+// サイト別ワーカー間スタガー（ms）
+const WORKER_STAGGER: Record<string, number> = {
+    mynavi: 300,
+    rikunabi: 500,
+    doda: 800,
+};
+// サイト別リクエスト間インターバル（ms）
+const REQUEST_INTERVAL: Record<string, number> = {
+    mynavi: 200,
+    rikunabi: 300,
+    doda: 400,
+};
 
 export interface ScrapingProgress {
     current: number;
@@ -329,7 +347,7 @@ export class ScrapingEngine {
             log(`[DEBUG] 並列モード: ${supportsParallel ? '有効' : '無効'} (source: ${strategy.source})`);
         }
 
-        const parallelWorkers = options.parallelWorkers ?? DEFAULT_PARALLEL_WORKERS;
+        const parallelWorkers = options.parallelWorkers ?? PARALLEL_WORKERS[strategy.source] ?? DEFAULT_PARALLEL_WORKERS;
 
         if (supportsParallel) {
             log(`並列スクレイピングモード開始 (${parallelWorkers}ページ同時)`);
@@ -429,11 +447,20 @@ export class ScrapingEngine {
                 });
             };
 
-            // ローカルキャッシュ: 既存会社名を一括取得
-            const { data: existingCompanies } = await supabase
-                .from('companies')
-                .select('company_name');
-            const seqProcessedNames = new Set((existingCompanies || []).map((c: any) => c.company_name));
+            // ローカルキャッシュ: 既存会社名を一括取得（ページネーション）
+            let allExistingCompanies: any[] = [];
+            let ecFrom = 0;
+            const EC_PAGE = 1000;
+            while (true) {
+                const { data } = await supabase
+                    .from('companies')
+                    .select('company_name')
+                    .range(ecFrom, ecFrom + EC_PAGE - 1);
+                allExistingCompanies = allExistingCompanies.concat(data || []);
+                if (!data || data.length < EC_PAGE) break;
+                ecFrom += EC_PAGE;
+            }
+            const seqProcessedNames = new Set(allExistingCompanies.map((c: any) => c.company_name));
 
             // 会社データを処理する関数
             // ※フィルターは事前（検索条件・サイドバー）で適用済み
@@ -690,12 +717,21 @@ export class ScrapingEngine {
                 }
             }
 
-            // ★ DB既存データを除外（一括取得で高速化）
+            // ★ DB既存データを除外（ページネーションで全件取得）
             const beforeDbCheck = jobUrls.length;
-            const { data: existingCompanies } = await supabase
-                .from('companies')
-                .select('company_name');
-            const existingNames = new Set((existingCompanies || []).map((c: any) => c.company_name));
+            let allExistingCompanies: any[] = [];
+            let ecFrom = 0;
+            const EC_PAGE = 1000;
+            while (true) {
+                const { data } = await supabase
+                    .from('companies')
+                    .select('company_name')
+                    .range(ecFrom, ecFrom + EC_PAGE - 1);
+                allExistingCompanies = allExistingCompanies.concat(data || []);
+                if (!data || data.length < EC_PAGE) break;
+                ecFrom += EC_PAGE;
+            }
+            const existingNames = new Set(allExistingCompanies.map((c: any) => c.company_name));
             jobUrls = jobUrls.filter(job => !existingNames.has(job.companyName));
             const dbDupCount = beforeDbCheck - jobUrls.length;
             if (dbDupCount > 0) {
@@ -789,11 +825,15 @@ export class ScrapingEngine {
                 }
                 processedNames.add(company.company_name);
 
-                // 保存
+                // 保存（company + job を並列実行）
                 newCount++;
-                await this.companyRepo.safeUpsert(company as any);
+                const job = DataConverter.companyDataToJob(company);
+                await Promise.all([
+                    this.companyRepo.safeUpsert(company as any),
+                    this.jobRepo.upsert(job).catch(e => console.error(`Failed to save job:`, e)),
+                ]);
 
-                // 電話番号取得（バックグラウンド）
+                // 電話番号取得（バックグラウンド・非ブロッキング）
                 if (!company.phone) {
                     const googleMapsService = getGoogleMapsService();
                     if (googleMapsService) {
@@ -810,14 +850,6 @@ export class ScrapingEngine {
                     }
                 }
 
-                // Job型に変換して保存
-                try {
-                    const job = DataConverter.companyDataToJob(company);
-                    await this.jobRepo.upsert(job);
-                } catch (error) {
-                    console.error(`Failed to convert/save job:`, error);
-                }
-
                 updateProgress();
             };
 
@@ -825,7 +857,8 @@ export class ScrapingEngine {
             const workerContexts: BrowserContext[] = [];
             const workerPages: Page[] = [];
 
-            for (let i = 0; i < parallelWorkers; i++) {
+            // ワーカーコンテキスト・ページを並列作成
+            const workerSetupPromises = Array.from({ length: parallelWorkers }, async () => {
                 const ctx = await this.browser!.newContext({
                     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
                     locale: 'ja-JP',
@@ -834,9 +867,7 @@ export class ScrapingEngine {
                     ignoreHTTPSErrors: true,
                     bypassCSP: true,
                 });
-                // Cookie注入なし（独立セッション）
                 const page = await ctx.newPage();
-                // doda対策: ブラウザらしいHTTPヘッダーを設定
                 await page.setExtraHTTPHeaders({
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
                     'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
@@ -851,8 +882,12 @@ export class ScrapingEngine {
                     'Sec-Fetch-Site': 'none',
                     'Upgrade-Insecure-Requests': '1',
                 });
-                workerContexts.push(ctx);
-                workerPages.push(page);
+                return { ctx, page };
+            });
+            const workers = await Promise.all(workerSetupPromises);
+            for (const w of workers) {
+                workerContexts.push(w.ctx);
+                workerPages.push(w.page);
             }
 
             // ジョブキュー（事前dedup + DBチェック済みのためシンプルなindex++）
@@ -865,11 +900,12 @@ export class ScrapingEngine {
                 return null;
             };
 
-            // 並列ワーカー（開始をずらして同時リクエストを回避）
+            // 並列ワーカー（サイト別最適スタガー）
+            const stagger = WORKER_STAGGER[strategy.source] ?? 500;
+            const reqInterval = REQUEST_INTERVAL[strategy.source] ?? 300;
             const workerPromises = workerPages.map(async (page, workerIdx) => {
-                // ワーカーごとに1秒ずらして開始（同時リクエストによるブロック回避）
                 if (workerIdx > 0) {
-                    await new Promise(resolve => setTimeout(resolve, workerIdx * 1000));
+                    await new Promise(resolve => setTimeout(resolve, workerIdx * stagger));
                 }
                 while (!this.shouldStop) {
                     const jobInfo = getNextJob();
@@ -898,8 +934,8 @@ export class ScrapingEngine {
                         updateProgress();
                     }
 
-                    // レート制限回避: リクエスト間に短いインターバル
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                    // サイト別リクエスト間インターバル
+                    await new Promise(resolve => setTimeout(resolve, reqInterval));
                 }
             });
 

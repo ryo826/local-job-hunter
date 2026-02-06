@@ -200,8 +200,8 @@ export class DodaStrategy implements ScrapingStrategy {
     readonly source = 'doda';
 
     // レート制限設定
-    private readonly REQUEST_INTERVAL = 4000;  // 4秒
-    private readonly PAGE_INTERVAL = 7000;     // 7秒
+    private readonly REQUEST_INTERVAL = 1500;  // 1.5秒
+    private readonly PAGE_INTERVAL = 2000;     // 2秒
 
     // dodaの年収ドロップダウン選択肢マッピング（実HTML確認済み）
     // 選択肢: 指定しない, 200万円, 250万円, 300万円, 350万円, 400万円, 450万円,
@@ -694,7 +694,7 @@ export class DodaStrategy implements ScrapingStrategy {
                 });
 
                 // 追加の待機
-                await page.waitForTimeout(randomDelay(2000, 4000));
+                await page.waitForTimeout(randomDelay(500, 1000));
 
                 // 求人カードが表示されるまで待機
                 await page.waitForSelector('.jobCard-card', { timeout: 15000 }).catch(() => {
@@ -737,7 +737,7 @@ export class DodaStrategy implements ScrapingStrategy {
             }
         }
 
-        await page.waitForTimeout(randomDelay(2000, 3000));
+        await page.waitForTimeout(randomDelay(500, 1000));
 
         // Playwrightでサイドバーフィルターを適用（勤務地・職種・年収・従業員数など）
         const hasFilters = params.minSalary || params.minEmployees ||
@@ -826,7 +826,7 @@ export class DodaStrategy implements ScrapingStrategy {
 
                     try {
                         await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                        await page.waitForTimeout(randomDelay(3000, 5000));
+                        await page.waitForTimeout(randomDelay(800, 1500));
                     } catch (navError: any) {
                         log(`Navigation error: ${navError.message}, skipping`);
                         continue;
@@ -856,7 +856,7 @@ export class DodaStrategy implements ScrapingStrategy {
                         log(`Navigating to job detail page: ${jobDetailUrl}`);
                         try {
                             await page.goto(jobDetailUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                            await page.waitForTimeout(randomDelay(2000, 4000));
+                            await page.waitForTimeout(randomDelay(500, 1000));
                             log('Job detail page loaded');
                         } catch (error: any) {
                             log(`Failed to navigate to job detail: ${error.message}`);
@@ -944,13 +944,13 @@ export class DodaStrategy implements ScrapingStrategy {
 
                     // リストページに戻る
                     await page.goBack({ waitUntil: 'domcontentloaded' });
-                    await page.waitForTimeout(randomDelay(2000, 4000));
+                    await page.waitForTimeout(randomDelay(500, 1000));
 
                     // 会社概要タブから戻った場合、さらに戻る必要がある場合
                     const currentUrl = page.url();
                     if (!currentUrl.includes('JobSearchList')) {
                         await page.goBack({ waitUntil: 'domcontentloaded' });
-                        await page.waitForTimeout(randomDelay(1000, 2000));
+                        await page.waitForTimeout(randomDelay(300, 600));
                     }
 
                 } catch (err) {
@@ -976,7 +976,7 @@ export class DodaStrategy implements ScrapingStrategy {
             if (await nextButton.count() > 0 && await nextButton.isVisible()) {
                 try {
                     await nextButton.click();
-                    await page.waitForTimeout(randomDelay(4000, 6000));
+                    await page.waitForTimeout(randomDelay(1000, 2000));
                 } catch (error) {
                     log(`Error navigating to next page: ${error}`);
                     hasNext = false;
@@ -1047,7 +1047,7 @@ export class DodaStrategy implements ScrapingStrategy {
                 });
 
                 await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                await page.waitForTimeout(randomDelay(2000, 3000));
+                await page.waitForTimeout(randomDelay(500, 1000));
                 pageLoaded = true;
             } catch (error: any) {
                 retries--;
@@ -1121,7 +1121,7 @@ export class DodaStrategy implements ScrapingStrategy {
 
             try {
                 await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                await page.waitForTimeout(randomDelay(2000, 3000));
+                await page.waitForTimeout(randomDelay(500, 1000));
                 pageNum = startPage - 1;  // ループで+1されるので
                 globalIndex = (startPage - 1) * CARDS_PER_PAGE;
             } catch (error: any) {
@@ -1134,10 +1134,40 @@ export class DodaStrategy implements ScrapingStrategy {
             log(`Collecting URLs from page ${pageNum}...`);
 
             await this.scrollToBottom(page, log);
-            const jobCards = await page.locator('.jobCard-card').all();
-            log(`Found ${jobCards.length} job cards on page ${pageNum}`);
 
-            for (let i = 0; i < jobCards.length; i++) {
+            // page.evaluate()で全カード情報を一括取得（高速化 + 安定性向上）
+            const pageCards = await page.evaluate(() => {
+                const cards = document.querySelectorAll('.jobCard-card');
+                return Array.from(cards).map(card => {
+                    // リンク要素を複数セレクタで探す
+                    const linkEl = card.querySelector('a.jobCard-header__link') ||
+                        card.querySelector('a[href*="JobSearchDetail"]') ||
+                        card.querySelector('a[href*="jid"]') ||
+                        card.querySelector('.jobCard-header a') ||
+                        card.querySelector('a[href]');
+                    const url = linkEl?.getAttribute('href') || null;
+
+                    // 会社名
+                    const nameEl = card.querySelector('a.jobCard-header__link h2') ||
+                        card.querySelector('.jobCard-header h2') ||
+                        card.querySelector('h2');
+                    const companyName = nameEl?.textContent?.trim() || '';
+
+                    // 求人タイトル
+                    const titleEl = card.querySelector('a.jobCard-header__link p') ||
+                        card.querySelector('.jobCard-header p') ||
+                        card.querySelector('.jobCard-header__jobTitle');
+                    const jobTitle = titleEl?.textContent?.trim() || '';
+
+                    return { url, companyName, jobTitle };
+                });
+            });
+            log(`Found ${pageCards.length} job cards on page ${pageNum}`);
+
+            let noUrlCount = 0;
+            let rankFilteredCount = 0;
+
+            for (let i = 0; i < pageCards.length; i++) {
                 const displayIndex = globalIndex + i;
 
                 // 最大位置を超えたら収集終了
@@ -1152,65 +1182,54 @@ export class DodaStrategy implements ScrapingStrategy {
                     continue;
                 }
 
-                try {
-                    const card = jobCards[i];
-                    const linkEl = card.locator('a.jobCard-header__link').first();
-                    const url = await linkEl.getAttribute('href');
-                    if (!url) continue;
+                const card = pageCards[i];
+                if (!card.url) { noUrlCount++; continue; }
 
-                    const fullUrl = url.startsWith('http') ? url : `https://doda.jp${url}`;
+                const fullUrl = card.url.startsWith('http') ? card.url : `https://doda.jp${card.url}`;
 
-                    const companyNameEl = card.locator('a.jobCard-header__link h2').first();
-                    const companyName = (await companyNameEl.textContent())?.trim() || '';
-
-                    const jobTitleEl = card.locator('a.jobCard-header__link p').first();
-                    const jobTitle = (await jobTitleEl.textContent())?.trim() || '';
-
-                    // ランク判定（絶対表示順位ベース）
-                    // A級: 1〜20位, B級: 21〜100位, C級: 101位以降
-                    const isPR = url.includes('-tab__pr/') || url.includes('/pr/');
-                    let rank: BudgetRank;
-                    if (isPR) {
-                        rank = 'A';  // PR枠
-                    } else if (displayIndex < 20) {
-                        rank = 'A';  // 1〜20位
-                    } else if (displayIndex < 100) {
-                        rank = 'B';  // 21〜100位
-                    } else {
-                        rank = 'C';  // 101位以降
-                    }
-
-                    // ランクフィルターでフィルタリング（PR枠はAランク扱い）
-                    if (rankFilter && rankFilter.length > 0 && !rankFilter.includes(rank)) {
-                        continue;
-                    }
-
-                    // 詳細ページURLを事前計算
-                    let detailUrl = fullUrl;
-                    if (!fullUrl.includes('-fm__jobdetail')) {
-                        if (fullUrl.includes('-tab__')) {
-                            detailUrl = fullUrl.replace(/-tab__[a-z]+\/?$/, '-tab__jd/-fm__jobdetail/');
-                        } else {
-                            detailUrl = fullUrl.replace(/\/?$/, '/-tab__jd/-fm__jobdetail/');
-                        }
-                        detailUrl = detailUrl.replace(/\/+/g, '/').replace(':/', '://');
-                    }
-
-                    allJobs.push({
-                        url: fullUrl,
-                        detailUrl,
-                        companyName,
-                        jobTitle,
-                        rank,
-                        displayIndex,
-                    });
-                } catch (err) {
-                    // 個別エラーは無視
+                // ランク判定（絶対表示順位ベース + PR枠検出）
+                // A級: 1〜20位 or PR枠, B級: 21〜100位, C級: 101位以降
+                const isPR = card.url.includes('-tab__pr/') || card.url.includes('/pr/');
+                let rank: BudgetRank;
+                if (isPR) {
+                    rank = 'A';  // PR枠
+                } else if (displayIndex < 20) {
+                    rank = 'A';  // 1〜20位
+                } else if (displayIndex < 100) {
+                    rank = 'B';  // 21〜100位
+                } else {
+                    rank = 'C';  // 101位以降
                 }
+
+                // ランクフィルターでフィルタリング（PR枠はAランク扱い）
+                if (rankFilter && rankFilter.length > 0 && !rankFilter.includes(rank)) {
+                    rankFilteredCount++;
+                    continue;
+                }
+
+                // 詳細ページURLを事前計算
+                let detailUrl = fullUrl;
+                if (!fullUrl.includes('-fm__jobdetail')) {
+                    if (fullUrl.includes('-tab__')) {
+                        detailUrl = fullUrl.replace(/-tab__[a-z]+\/?$/, '-tab__jd/-fm__jobdetail/');
+                    } else {
+                        detailUrl = fullUrl.replace(/\/?$/, '/-tab__jd/-fm__jobdetail/');
+                    }
+                    detailUrl = detailUrl.replace(/\/+/g, '/').replace(':/', '://');
+                }
+
+                allJobs.push({
+                    url: fullUrl,
+                    detailUrl,
+                    companyName: card.companyName,
+                    jobTitle: card.jobTitle,
+                    rank,
+                    displayIndex,
+                });
             }
 
             // グローバルインデックスを更新
-            globalIndex += jobCards.length;
+            globalIndex += pageCards.length;
 
             // 収集終了フラグがセットされている場合はループを抜ける
             if (!hasNext) break;
@@ -1220,7 +1239,7 @@ export class DodaStrategy implements ScrapingStrategy {
             if (await nextButton.count() > 0 && await nextButton.isVisible()) {
                 try {
                     await nextButton.click();
-                    await page.waitForTimeout(randomDelay(3000, 5000));
+                    await page.waitForTimeout(randomDelay(800, 1500));
                 } catch (error) {
                     hasNext = false;
                 }
@@ -1245,7 +1264,7 @@ export class DodaStrategy implements ScrapingStrategy {
 
                 // 詳細ページに直接遷移（二重ナビゲーション回避）
                 const targetUrl = jobInfo.detailUrl || jobInfo.url;
-                await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+                await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 8000 });
                 await page.waitForTimeout(randomDelay(500, 1000));
 
             // 404チェック
