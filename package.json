@@ -11,7 +11,10 @@
     "build:electron": "tsc -p tsconfig.electron.json",
     "lint": "eslint .",
     "preview": "vite preview",
-    "electron": "electron ."
+    "electron": "electron .",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "postinstall": "npx playwright install chromium"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
@@ -19,7 +22,6 @@
     "@supabase/supabase-js": "^2.95.2",
     "@tanstack/react-query": "^5.90.20",
     "axios": "^1.13.4",
-    "better-sqlite3": "^12.6.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
@@ -34,7 +36,6 @@
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@tailwindcss/vite": "^4.1.18",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",

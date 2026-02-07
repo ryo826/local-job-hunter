@@ -3,12 +3,9 @@ import { SupabaseCompanyRepository } from './repositories/SupabaseCompanyReposit
 import { SupabaseJobRepository } from './repositories/SupabaseJobRepository';
 import { supabase } from './supabase';
 import { ScrapingStrategy, ScrapingParams, CompanyData, BudgetRank, JobCardInfo } from './strategies/ScrapingStrategy';
-import { ScrapingLogRepository } from './repositories/ScrapingLogRepository';
+import { SupabaseScrapingLogRepository } from './repositories/SupabaseScrapingLogRepository';
 import { DataConverter } from './services/DataConverter';
 import { getGoogleMapsService } from './services/GoogleMapsService';
-import Database from 'better-sqlite3';
-import path from 'path';
-import { app } from 'electron';
 
 // 並列処理の設定（サイト別最適化）
 const PARALLEL_WORKERS: Record<string, number> = {
@@ -82,21 +79,16 @@ export class ScrapingEngine {
     private browser: Browser | null = null;
     private isRunning = false;
     private shouldStop = false;
-    private db: Database.Database;
     private companyRepo: SupabaseCompanyRepository;
     private jobRepo: SupabaseJobRepository;
-    private logRepo: ScrapingLogRepository;
+    private logRepo: SupabaseScrapingLogRepository;
     // 確認待ち用
     private confirmationResolver: ((confirmed: boolean) => void) | null = null;
 
     constructor() {
-        // ローカルSQLite（ログ用のみ）
-        const dbPath = path.join(app.getPath('userData'), 'companies.db');
-        this.db = new Database(dbPath);
-        this.logRepo = new ScrapingLogRepository(this.db);
-        // Supabase repositories
         this.companyRepo = new SupabaseCompanyRepository();
         this.jobRepo = new SupabaseJobRepository();
+        this.logRepo = new SupabaseScrapingLogRepository();
     }
 
     async start(
@@ -574,7 +566,7 @@ export class ScrapingEngine {
 
             // スクレイピングログを記録
             const durationMs = Date.now() - startTime;
-            this.logRepo.insert({
+            await this.logRepo.insert({
                 scrapeType: 'full',
                 source: strategy.source as 'mynavi' | 'doda' | 'rikunabi',
                 status: errors > jobsFound * 0.5 ? 'partial' : 'success',
@@ -956,7 +948,7 @@ export class ScrapingEngine {
             log(`完了: ${newCount}件新規, ${totalDuplicate}件重複, ${totalSkipped}件スキップ (${Math.round(durationMs / 1000)}秒)`);
 
             // ログ記録
-            this.logRepo.insert({
+            await this.logRepo.insert({
                 scrapeType: 'full',
                 source: strategy.source as 'mynavi' | 'doda' | 'rikunabi',
                 status: 'success',

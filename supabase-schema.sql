@@ -84,9 +84,31 @@ CREATE INDEX idx_jobs_source ON jobs(source);
 CREATE INDEX idx_jobs_company ON jobs(company_name);
 CREATE INDEX idx_jobs_active ON jobs(is_active);
 
+-- scraping_logs テーブル
+CREATE TABLE scraping_logs (
+  id BIGSERIAL PRIMARY KEY,
+  scrape_type TEXT NOT NULL,
+  source TEXT NOT NULL,
+  target_url TEXT,
+  status TEXT NOT NULL,
+  jobs_found INTEGER DEFAULT 0,
+  new_jobs INTEGER DEFAULT 0,
+  updated_jobs INTEGER DEFAULT 0,
+  errors INTEGER DEFAULT 0,
+  error_message TEXT,
+  duration_ms INTEGER DEFAULT 0,
+  scraped_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX idx_scraping_logs_source ON scraping_logs(source);
+CREATE INDEX idx_scraping_logs_scraped_at ON scraping_logs(scraped_at DESC);
+
 -- RLS無効化（認証なしアクセス）
 ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow all access to companies" ON companies FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all access to jobs" ON jobs FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE scraping_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all access to scraping_logs" ON scraping_logs FOR ALL USING (true) WITH CHECK (true);

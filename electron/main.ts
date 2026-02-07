@@ -29,7 +29,6 @@ if (process.platform === 'win32') {
         originalLog(output);
     };
 }
-import { initDB } from './database';
 import { SupabaseCompanyRepository } from './repositories/SupabaseCompanyRepository';
 import { ScrapingEngine } from './scraping-engine';
 import { UpdateEngine } from './update-engine';
@@ -107,12 +106,6 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
-    initDB();
-
-    // One-time migration from local SQLite to Supabase
-    const { migrateToSupabase } = await import('./migrate-to-supabase');
-    await migrateToSupabase();
-
     createWindow();
 
     app.on('activate', () => {
