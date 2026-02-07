@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import fs from 'fs';
 import path from 'path';
-import dotenv from 'dotenv';
 import { spawn } from 'child_process';
 
 // Windows console UTF-8 fix
@@ -54,55 +53,11 @@ function saveSettings(settings: Record<string, string>): void {
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
 }
 
-// Load environment variables from .env file
-// In development: .env is in project root
-// In production: .env should be in project root (2 levels up from dist-electron/electron/)
-const envPath = app.isPackaged
-    ? path.join(process.resourcesPath, '.env')
-    : path.join(__dirname, '../../.env');
-console.log('[Main] Loading .env from:', envPath);
-
-// Check if file exists and read content for debugging
-if (fs.existsSync(envPath)) {
-    console.log('[Main] .env file exists');
-    let content = fs.readFileSync(envPath, 'utf-8');
-
-    // Remove BOM if present
-    if (content.charCodeAt(0) === 0xFEFF) {
-        content = content.slice(1);
-    }
-
-    // Normalize line endings (CRLF -> LF)
-    content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-
-    const lines = content.split('\n').filter(line => line.trim() && !line.startsWith('#'));
-    console.log('[Main] .env non-comment lines:', lines.length);
-
-    // Parse manually to avoid encoding issues
-    for (const line of lines) {
-        console.log('[Main] Parsing line:', JSON.stringify(line));
-        const match = line.match(/^([^=]+)=(.*)$/);
-        if (match) {
-            const key = match[1].trim();
-            const value = match[2].trim();
-            process.env[key] = value;
-            console.log(`[Main] Set ${key}: ${value ? 'yes' : 'no'}`);
-        } else {
-            console.log('[Main] Line did not match pattern');
-        }
-    }
-} else {
-    console.log('[Main] .env file NOT found at:', envPath);
-    // Fallback: also try dotenv
-    dotenv.config({ path: envPath });
-}
-
-// Override with settings.json if API key exists there
+// Load Google Maps API key from settings.json
 const settings = loadSettings();
 if (settings.GOOGLE_MAPS_API_KEY) {
     process.env.GOOGLE_MAPS_API_KEY = settings.GOOGLE_MAPS_API_KEY;
 }
-
 console.log('[Main] GOOGLE_MAPS_API_KEY set:', !!process.env.GOOGLE_MAPS_API_KEY);
 
 let mainWindow: BrowserWindow | null = null;
