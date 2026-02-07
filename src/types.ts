@@ -128,6 +128,11 @@ export type { Job, Location } from './shared/types/Job';
 export type { JobFilters, ScrapingLog, NgKeyword } from './shared/types/ScrapingLog';
 
 export interface IElectronAPI {
+    settings: {
+        getApiKey: () => Promise<string>;
+        saveApiKey: (apiKey: string) => Promise<{ success: boolean }>;
+        hasApiKey: () => Promise<boolean>;
+    };
     db: {
         getCompanies: (filters: CompanyFilters) => Promise<Company[]>;
         getCompany: (id: number) => Promise<Company | null>;

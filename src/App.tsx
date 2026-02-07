@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { ThemeProvider } from './components/theme-provider';
+import { ApiKeyDialog } from './components/ApiKeyDialog';
 import { DashboardPage } from './pages/DashboardPage';
 import { SearchPage } from './pages/SearchPage';
 import { ListPage } from './pages/ListPage';
@@ -12,14 +13,20 @@ import './index.css';
 function App() {
   const { fetchCompanies, setupScrapingListener } = useAppStore();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    // Restore from localStorage
     const saved = localStorage.getItem('sidebar-collapsed');
     return saved === 'true';
   });
+  const [showApiKeyDialog, setShowApiKeyDialog] = useState(false);
+  const [apiKeyChecked, setApiKeyChecked] = useState(false);
 
   useEffect(() => {
     fetchCompanies();
     setupScrapingListener();
+    // Check if API key is configured
+    window.electronAPI.settings.hasApiKey().then((has) => {
+      setShowApiKeyDialog(!has);
+      setApiKeyChecked(true);
+    });
   }, []);
 
   const handleSidebarToggle = () => {
@@ -32,6 +39,12 @@ function App() {
 
   return (
     <ThemeProvider defaultTheme="light" storageKey="job-hunter-theme">
+      {apiKeyChecked && (
+        <ApiKeyDialog
+          open={showApiKeyDialog}
+          onSaved={() => setShowApiKeyDialog(false)}
+        />
+      )}
       <HashRouter>
         <div className="min-h-screen bg-background">
           <Sidebar collapsed={sidebarCollapsed} onToggle={handleSidebarToggle} />

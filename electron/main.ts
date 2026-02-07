@@ -36,6 +36,24 @@ import { getExportService } from './services/ExportService';
 
 const companyRepository = new SupabaseCompanyRepository();
 
+// Settings file management
+const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+
+function loadSettings(): Record<string, string> {
+    try {
+        if (fs.existsSync(settingsPath)) {
+            return JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+        }
+    } catch (e) {
+        console.error('[Main] Failed to load settings:', e);
+    }
+    return {};
+}
+
+function saveSettings(settings: Record<string, string>): void {
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+}
+
 // Load environment variables from .env file
 // In development: .env is in project root
 // In production: .env should be in project root (2 levels up from dist-electron/electron/)
@@ -77,6 +95,12 @@ if (fs.existsSync(envPath)) {
     console.log('[Main] .env file NOT found at:', envPath);
     // Fallback: also try dotenv
     dotenv.config({ path: envPath });
+}
+
+// Override with settings.json if API key exists there
+const settings = loadSettings();
+if (settings.GOOGLE_MAPS_API_KEY) {
+    process.env.GOOGLE_MAPS_API_KEY = settings.GOOGLE_MAPS_API_KEY;
 }
 
 console.log('[Main] GOOGLE_MAPS_API_KEY set:', !!process.env.GOOGLE_MAPS_API_KEY);
@@ -307,4 +331,22 @@ ipcMain.handle('update:stop', async () => {
         updateEngine = null;
     }
     return { success: true };
+});
+
+// Settings Handlers
+ipcMain.handle('settings:getApiKey', async () => {
+    const s = loadSettings();
+    return s.GOOGLE_MAPS_API_KEY || '';
+});
+
+ipcMain.handle('settings:saveApiKey', async (_event, apiKey: string) => {
+    const s = loadSettings();
+    s.GOOGLE_MAPS_API_KEY = apiKey;
+    saveSettings(s);
+    process.env.GOOGLE_MAPS_API_KEY = apiKey;
+    return { success: true };
+});
+
+ipcMain.handle('settings:hasApiKey', async () => {
+    return !!process.env.GOOGLE_MAPS_API_KEY;
 });

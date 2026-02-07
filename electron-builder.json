@@ -8,14 +8,12 @@
     "dist/**/*",
     "dist-electron/**/*"
   ],
-  "extraResources": [
-    {
-      "from": ".env",
-      "to": ".env"
-    }
-  ],
   "win": {
     "target": ["nsis", "zip"]
+  },
+  "mac": {
+    "target": ["dmg", "zip"],
+    "category": "public.app-category.business"
   },
   "nsis": {
     "oneClick": false,

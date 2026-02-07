@@ -134,6 +134,14 @@ const electronAPI = {
             ipcRenderer.removeAllListeners('enrich:log');
         },
     },
+    settings: {
+        getApiKey: (): Promise<string> =>
+            ipcRenderer.invoke('settings:getApiKey'),
+        saveApiKey: (apiKey: string): Promise<{ success: boolean }> =>
+            ipcRenderer.invoke('settings:saveApiKey', apiKey),
+        hasApiKey: (): Promise<boolean> =>
+            ipcRenderer.invoke('settings:hasApiKey'),
+    },
     update: {
         startUpdate: (companyIds?: number[]): Promise<{ success: boolean; error?: string; results?: UpdateResult[] }> =>
             ipcRenderer.invoke('update:start', companyIds),
