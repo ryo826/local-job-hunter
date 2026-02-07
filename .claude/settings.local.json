@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "Bash(npm run build:*)",
+      "Bash(ls:*)",
+      "Bash(npm run:*)",
+      "Bash(timeout:*)",
+      "Bash(node -e \"const { createClient } = require\\(''@supabase/supabase-js''\\); const s = createClient\\(''https://fagrilpjbyufwwqjdugx.supabase.co'', ''sb_publishable_mJv-1KTKQJTo8_lZTrVpIQ_qZZCq049''\\); s.from\\(''companies''\\).select\\(''id, company_name'', { count: ''exact'', head: false }\\).limit\\(5\\).then\\(r => console.log\\(''count:'', r.count, ''\\\\ndata:'', JSON.stringify\\(r.data?.map\\(d=>d.company_name\\), null, 2\\)\\)\\);\")",
+      "Bash(git status:*)",
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nOptimize scraping speed and fix Supabase 1000-row limit\n\n- Add pagination to all Supabase queries to fetch beyond 1000-row server limit\n- Reduce delays and timeouts across all strategies for faster scraping\n- Combine multiple Playwright calls into single page.evaluate\\(\\) for speed\n- Use site-specific parallel workers \\(mynavi=15, rikunabi=12, doda=8\\)\n- Parallelize DB writes and worker context creation\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(find:*)",
+      "Bash(git commit:*)"
+    ]
+  },
+  "outputStyle": "default"
+}

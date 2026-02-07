@@ -13,6 +13,11 @@ dist-ssr
 dist-electron
 *.local
 
+# Environment variables (contains API keys)
+.env
+.env.local
+.env.*.local
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -23,3 +28,8 @@ dist-electron
 *.njsproj
 *.sln
 *.sw?
+NUL
+
+local-job-hunter/
+release/
+NUL

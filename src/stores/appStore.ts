@@ -1,5 +1,16 @@
 import { create } from 'zustand';
-import type { Company, CompanyFilters, ScrapingProgress, ScrapingOptions } from '../types';
+import type { Company, CompanyFilters, ScrapingProgress, ScrapingOptions, UpdateProgress, UpdateResult, BudgetRank } from '../types';
+
+// スクレイピング設定の状態
+export interface ScrapingSettingsState {
+    selectedSite: 'mynavi' | 'rikunabi' | 'doda';  // 単一選択に変更
+    selectedPrefectures: string[];
+    selectedJobTypes: string[];
+    selectedRanks: BudgetRank[];
+    salaryFilter: string;
+    employeesFilter: string;
+    jobUpdatedFilter: string;
+}
 
 interface AppState {
     // Companies
@@ -13,8 +24,18 @@ interface AppState {
     // Scraping
     isScrapingRunning: boolean;
     scrapingProgress: ScrapingProgress | null;
+    scrapingSettings: ScrapingSettingsState | null;
     setScrapingRunning: (isRunning: boolean) => void;
     setScrapingProgress: (progress: ScrapingProgress | null) => void;
+    setScrapingSettings: (settings: ScrapingSettingsState | null) => void;
+
+    // Update
+    isUpdateRunning: boolean;
+    updateProgress: UpdateProgress | null;
+    lastUpdateResults: UpdateResult[] | null;
+    setUpdateRunning: (isRunning: boolean) => void;
+    setUpdateProgress: (progress: UpdateProgress | null) => void;
+    setLastUpdateResults: (results: UpdateResult[] | null) => void;
 
     // Actions
     fetchCompanies: () => Promise<void>;
@@ -22,6 +43,8 @@ interface AppState {
     startScraping: (options: ScrapingOptions) => Promise<void>;
     stopScraping: () => Promise<void>;
     setupScrapingListener: () => void;
+    startUpdate: (companyIds?: number[]) => Promise<UpdateResult[] | null>;
+    stopUpdate: () => Promise<void>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -31,6 +54,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     isLoading: false,
     isScrapingRunning: false,
     scrapingProgress: null,
+    scrapingSettings: null,
+    isUpdateRunning: false,
+    updateProgress: null,
+    lastUpdateResults: null,
 
     // Setters
     setCompanies: (companies) => set({ companies }),
@@ -38,6 +65,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     setIsLoading: (isLoading) => set({ isLoading }),
     setScrapingRunning: (isScrapingRunning) => set({ isScrapingRunning }),
     setScrapingProgress: (scrapingProgress) => set({ scrapingProgress }),
+    setScrapingSettings: (scrapingSettings) => set({ scrapingSettings }),
+    setUpdateRunning: (isUpdateRunning) => set({ isUpdateRunning }),
+    setUpdateProgress: (updateProgress) => set({ updateProgress }),
+    setLastUpdateResults: (lastUpdateResults) => set({ lastUpdateResults }),
 
     // Actions
     fetchCompanies: async () => {
@@ -90,7 +121,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         } finally {
             window.electronAPI.scraper.offProgress();
             window.electronAPI.scraper.offLog();
-            set({ isScrapingRunning: false });
+            set({ isScrapingRunning: false, scrapingSettings: null });
             // Refresh companies after scraping
             await get().fetchCompanies();
         }
@@ -103,7 +134,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             console.error('Failed to stop scraping:', error);
         } finally {
             window.electronAPI.scraper.offProgress();
-            set({ isScrapingRunning: false, scrapingProgress: null });
+            set({ isScrapingRunning: false, scrapingProgress: null, scrapingSettings: null });
         }
     },
 
@@ -111,5 +142,53 @@ export const useAppStore = create<AppState>((set, get) => ({
         window.electronAPI.scraper.onProgress((progress) => {
             set({ scrapingProgress: progress });
         });
+    },
+
+    startUpdate: async (companyIds) => {
+        console.log('[AppStore] Starting update for:', companyIds ? `${companyIds.length} companies` : 'all companies');
+        set({ isUpdateRunning: true, updateProgress: null, lastUpdateResults: null });
+
+        // Set up progress listener
+        window.electronAPI.update.onProgress((progress) => {
+            console.log('[AppStore] Update progress:', progress);
+            set({ updateProgress: progress });
+        });
+        window.electronAPI.update.onLog((message) => {
+            console.log('[AppStore] Update log:', message);
+        });
+
+        try {
+            const result = await window.electronAPI.update.startUpdate(companyIds);
+            console.log('[AppStore] Update result:', result);
+            if (result.success && result.results) {
+                set({ lastUpdateResults: result.results });
+                return result.results;
+            } else if (!result.success) {
+                console.error('Update failed:', result.error);
+                alert(`更新エラー: ${result.error}`);
+            }
+            return null;
+        } catch (error) {
+            console.error('Update error:', error);
+            alert(`更新エラー: ${error}`);
+            return null;
+        } finally {
+            window.electronAPI.update.offProgress();
+            window.electronAPI.update.offLog();
+            set({ isUpdateRunning: false });
+            // Refresh companies after update
+            await get().fetchCompanies();
+        }
+    },
+
+    stopUpdate: async () => {
+        try {
+            await window.electronAPI.update.stop();
+        } catch (error) {
+            console.error('Failed to stop update:', error);
+        } finally {
+            window.electronAPI.update.offProgress();
+            set({ isUpdateRunning: false, updateProgress: null });
+        }
     },
 }));

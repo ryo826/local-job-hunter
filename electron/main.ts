@@ -2,15 +2,88 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import { initDB, companyRepository } from './database';
+import { spawn } from 'child_process';
+
+// Windows console UTF-8 fix
+if (process.platform === 'win32') {
+    // Set console code page to UTF-8
+    try {
+        spawn('chcp', ['65001'], { shell: true, stdio: 'ignore' });
+    } catch (e) {
+        // ignore
+    }
+
+    // Set output encoding
+    process.stdout.setDefaultEncoding?.('utf8');
+    process.stderr.setDefaultEncoding?.('utf8');
+
+    // Override console.log to handle encoding
+    const originalLog = console.log;
+    console.log = (...args: any[]) => {
+        const output = args.map(arg => {
+            if (typeof arg === 'string') {
+                return arg;
+            }
+            return String(arg);
+        }).join(' ');
+        originalLog(output);
+    };
+}
+import { SupabaseCompanyRepository } from './repositories/SupabaseCompanyRepository';
 import { ScrapingEngine } from './scraping-engine';
+import { UpdateEngine } from './update-engine';
 import { getExportService } from './services/ExportService';
 
+const companyRepository = new SupabaseCompanyRepository();
+
 // Load environment variables from .env file
-dotenv.config();
+// In development: .env is in project root
+// In production: .env should be in project root (2 levels up from dist-electron/electron/)
+const envPath = app.isPackaged
+    ? path.join(process.resourcesPath, '.env')
+    : path.join(__dirname, '../../.env');
+console.log('[Main] Loading .env from:', envPath);
+
+// Check if file exists and read content for debugging
+if (fs.existsSync(envPath)) {
+    console.log('[Main] .env file exists');
+    let content = fs.readFileSync(envPath, 'utf-8');
+
+    // Remove BOM if present
+    if (content.charCodeAt(0) === 0xFEFF) {
+        content = content.slice(1);
+    }
+
+    // Normalize line endings (CRLF -> LF)
+    content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    const lines = content.split('\n').filter(line => line.trim() && !line.startsWith('#'));
+    console.log('[Main] .env non-comment lines:', lines.length);
+
+    // Parse manually to avoid encoding issues
+    for (const line of lines) {
+        console.log('[Main] Parsing line:', JSON.stringify(line));
+        const match = line.match(/^([^=]+)=(.*)$/);
+        if (match) {
+            const key = match[1].trim();
+            const value = match[2].trim();
+            process.env[key] = value;
+            console.log(`[Main] Set ${key}: ${value ? 'yes' : 'no'}`);
+        } else {
+            console.log('[Main] Line did not match pattern');
+        }
+    }
+} else {
+    console.log('[Main] .env file NOT found at:', envPath);
+    // Fallback: also try dotenv
+    dotenv.config({ path: envPath });
+}
+
+console.log('[Main] GOOGLE_MAPS_API_KEY set:', !!process.env.GOOGLE_MAPS_API_KEY);
 
 let mainWindow: BrowserWindow | null = null;
 let scrapingEngine: ScrapingEngine | null = null;
+let updateEngine: UpdateEngine | null = null;
 
 function createWindow(): void {
     mainWindow = new BrowserWindow({
@@ -28,12 +101,11 @@ function createWindow(): void {
         mainWindow.loadURL('http://localhost:5173');
         mainWindow.webContents.openDevTools();
     } else {
-        mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+        mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
     }
 }
 
-app.whenReady().then(() => {
-    initDB();
+app.whenReady().then(async () => {
     createWindow();
 
     app.on('activate', () => {
@@ -51,11 +123,11 @@ app.on('window-all-closed', () => {
 
 // IPC Handlers
 ipcMain.handle('db:getCompanies', async (_event, filters) => {
-    return companyRepository.getAll(filters || {});
+    return await companyRepository.getAll(filters || {});
 });
 
 ipcMain.handle('db:getCompany', async (_event, id) => {
-    return companyRepository.getById(id);
+    return await companyRepository.getById(id);
 });
 
 ipcMain.handle('db:getDistinctAreas', async () => {
@@ -68,8 +140,18 @@ ipcMain.handle('db:getDistinctJobTitles', async () => {
 
 ipcMain.handle('db:updateCompany', async (_event, id, updates) => {
     try {
-        companyRepository.update(id, updates);
+        await companyRepository.update(id, updates);
         return { success: true };
+    } catch (error) {
+        return { success: false, error: String(error) };
+    }
+});
+
+// 会社を削除（複数対応）
+ipcMain.handle('db:deleteCompanies', async (_event: any, ids: number[]) => {
+    try {
+        const deleted = await companyRepository.deleteMany(ids);
+        return { success: true, deleted };
     } catch (error) {
         return { success: false, error: String(error) };
     }
@@ -117,72 +199,11 @@ ipcMain.handle('scraper:stop', async () => {
     return { success: true };
 });
 
-ipcMain.handle('export:csv', async (_event, ids?: number[], filters?: any) => {
-    try {
-        let companies;
-        if (ids && ids.length > 0) {
-            // Select specific IDs
-            // Since getAll doesn't support ID list, we fetch by ID loop or fetch all and filter.
-            // For efficiency with small DB, fetching all and filtering is fine, or improve repo.
-            // Let's use filter on getAll results for safety.
-            const all = companyRepository.getAll({});
-            companies = all.filter(c => ids.includes(c.id));
-        } else {
-            // Use filters
-            companies = companyRepository.getAll(filters || {});
-        }
-
-        if (companies.length === 0) {
-            return { success: false, error: '出力対象のデータがありません' };
-        }
-
-        // Generate CSV
-        const headers = [
-            '会社名', 'ソース', 'ステータス', '電話番号', 'HP',
-            '業種', 'エリア', '職種', '給与',
-            '住所', '設立', '従業員数', 'URL'
-        ];
-
-        const escape = (field: any) => {
-            if (field === null || field === undefined) return '';
-            const str = String(field).replace(/"/g, '""');
-            return `"${str}"`;
-        };
-
-        const rows = companies.map(c => [
-            escape(c.company_name),
-            escape(c.source),
-            escape(c.status),
-            escape(c.phone),
-            escape(c.homepage_url),
-            escape(c.industry),
-            escape(c.area),
-            escape(c.job_title),
-            escape(c.salary_text),
-            escape(c.address),
-            escape(c.establishment),
-            escape(c.employees),
-            escape(c.url)
-        ].join(','));
-
-        const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\n'); // BOM for Excel
-
-        const { filePath } = await dialog.showSaveDialog({
-            title: 'CSVを保存',
-            defaultPath: `companies_${new Date().toISOString().split('T')[0]}.csv`,
-            filters: [{ name: 'CSV Files', extensions: ['csv'] }]
-        });
-
-        if (filePath) {
-            fs.writeFileSync(filePath, csvContent);
-            return { success: true, message: `保存しました: ${filePath}` };
-        } else {
-            return { success: false, error: 'キャンセルされました' };
-        }
-    } catch (error) {
-        console.error('Export error:', error);
-        return { success: false, error: String(error) };
+ipcMain.handle('scraper:confirm', async (_event, proceed: boolean) => {
+    if (scrapingEngine) {
+        scrapingEngine.confirm(proceed);
     }
+    return { success: true };
 });
 
 // Google Maps API Enrichment
@@ -192,11 +213,18 @@ ipcMain.handle('enrich:startPhoneLookup', async () => {
         const service = getGoogleMapsService();
 
         if (!service) {
-            return { success: false, error: 'GOOGLE_MAPS_API_KEY not configured. Please set it in .env file.' };
+            const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+            let errorMsg = 'GOOGLE_MAPS_API_KEY not configured. Please set it in .env file.';
+            if (apiKey === 'your_google_maps_api_key_here' || apiKey?.startsWith('your_')) {
+                errorMsg = 'GOOGLE_MAPS_API_KEY is a placeholder. Please set a valid Google Maps API key in .env file.';
+            }
+            console.error('[PhoneLookup]', errorMsg);
+            return { success: false, error: errorMsg };
         }
 
         // 電話番号がない会社を取得
-        const companiesWithoutPhone = companyRepository.getAll({})
+        const allCompaniesForPhone = await companyRepository.getAll({});
+        const companiesWithoutPhone = allCompaniesForPhone
             .filter(c => !c.phone);
 
         if (companiesWithoutPhone.length === 0) {
@@ -219,7 +247,7 @@ ipcMain.handle('enrich:startPhoneLookup', async () => {
             const phone = await service.findCompanyPhone(company.company_name, company.address);
 
             if (phone) {
-                companyRepository.update(company.id, { phone });
+                await companyRepository.update(company.id, { phone });
                 updated++;
                 mainWindow?.webContents.send('enrich:log', `Found phone for ${company.company_name}: ${phone}`);
             } else {
@@ -236,7 +264,7 @@ ipcMain.handle('enrich:startPhoneLookup', async () => {
 
 // Get companies without phone numbers count
 ipcMain.handle('enrich:getStats', async () => {
-    const allCompanies = companyRepository.getAll({});
+    const allCompanies = await companyRepository.getAll({});
     const withPhone = allCompanies.filter(c => c.phone);
     const withoutPhone = allCompanies.filter(c => !c.phone);
 
@@ -245,4 +273,38 @@ ipcMain.handle('enrich:getStats', async () => {
         withPhone: withPhone.length,
         withoutPhone: withoutPhone.length,
     };
+});
+
+// Update Engine Handlers
+ipcMain.handle('update:start', async (_event, companyIds?: number[]) => {
+    if (updateEngine) {
+        return { success: false, error: 'Update already in progress' };
+    }
+
+    updateEngine = new UpdateEngine();
+
+    try {
+        const result = await updateEngine.start(
+            companyIds,
+            (progress) => {
+                mainWindow?.webContents.send('update:progress', progress);
+            },
+            (message) => {
+                mainWindow?.webContents.send('update:log', message);
+            }
+        );
+        return result;
+    } catch (error) {
+        return { success: false, error: String(error) };
+    } finally {
+        updateEngine = null;
+    }
+});
+
+ipcMain.handle('update:stop', async () => {
+    if (updateEngine) {
+        await updateEngine.stop();
+        updateEngine = null;
+    }
+    return { success: true };
 });

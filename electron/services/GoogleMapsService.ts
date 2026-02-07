@@ -54,6 +54,53 @@ export class GoogleMapsService {
     }
 
     /**
+     * Extract core company name by removing common suffixes/prefixes
+     */
+    private extractCoreName(name: string): string {
+        return name
+            .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+            .replace(/　/g, ' ')
+            .replace(/株式会社|有限会社|合同会社|合資会社|一般社団法人|一般財団法人|公益社団法人|公益財団法人|医療法人|社会福祉法人/g, '')
+            .replace(/\(株\)|（株）|\(有\)|（有）|\(同\)|（同）/g, '')
+            .replace(/Co\.,?\s*Ltd\.?|Inc\.?|Corp\.?|Corporation|LLC|Limited|Company/gi, '')
+            .replace(/[【】\[\]()（）「」『』・\s]/g, '')
+            .trim();
+    }
+
+    /**
+     * Check if Google Maps result name matches the searched company name
+     */
+    private isNameMatch(searchedName: string, resultName: string): boolean {
+        const coreSearched = this.extractCoreName(searchedName);
+        const coreResult = this.extractCoreName(resultName);
+
+        if (!coreSearched || !coreResult) return false;
+
+        // 完全一致
+        if (coreSearched === coreResult) return true;
+
+        // 片方がもう片方を含む
+        if (coreSearched.includes(coreResult) || coreResult.includes(coreSearched)) return true;
+
+        // 短い方の名前が長い方に80%以上含まれるかチェック
+        const shorter = coreSearched.length <= coreResult.length ? coreSearched : coreResult;
+        const longer = coreSearched.length <= coreResult.length ? coreResult : coreSearched;
+
+        // 短い方の文字が長い方に何文字含まれるか
+        let matchCount = 0;
+        const longerChars = [...longer];
+        for (const ch of shorter) {
+            const idx = longerChars.indexOf(ch);
+            if (idx !== -1) {
+                matchCount++;
+                longerChars.splice(idx, 1);
+            }
+        }
+        const ratio = matchCount / shorter.length;
+        return ratio >= 0.8 && shorter.length >= 2;
+    }
+
+    /**
      * Normalize address for better search results
      * Extract core address (prefecture + city + street number) and remove extra info
      */
@@ -145,41 +192,58 @@ export class GoogleMapsService {
                 timeout: 10000,
             });
 
-            if (searchResponse.data.status !== 'OK' || !searchResponse.data.results?.length) {
+            // API status check with detailed logging
+            if (searchResponse.data.status !== 'OK') {
+                console.log(`[GoogleMaps] API status: ${searchResponse.data.status}`);
+                if (searchResponse.data.error_message) {
+                    console.log(`[GoogleMaps] API error: ${searchResponse.data.error_message}`);
+                }
+                return null;
+            }
+
+            if (!searchResponse.data.results?.length) {
                 console.log(`[GoogleMaps] No results found for: ${query}`);
                 return null;
             }
 
-            const topResult: PlaceSearchResult = searchResponse.data.results[0];
-            console.log(`[GoogleMaps] Found place: ${topResult.name} (${topResult.place_id})`);
+            // 上位3件まで検索結果をチェックし、会社名が一致するものを採用
+            const candidates: PlaceSearchResult[] = searchResponse.data.results.slice(0, 3);
 
-            await this.rateLimit();
+            for (const candidate of candidates) {
+                if (!this.isNameMatch(normalizedName, candidate.name)) {
+                    console.log(`[GoogleMaps] Name mismatch: "${normalizedName}" vs "${candidate.name}" - skipping`);
+                    continue;
+                }
 
-            // Step 2: Get Place Details for phone number
-            const detailsResponse = await axios.get(`${this.baseUrl}/details/json`, {
-                params: {
-                    place_id: topResult.place_id,
-                    key: this.apiKey,
-                    fields: 'formatted_phone_number,international_phone_number,name,website',
-                    language: 'ja',
-                },
-                timeout: 10000,
-            });
+                console.log(`[GoogleMaps] Name match: "${candidate.name}" (${candidate.place_id})`);
 
-            if (detailsResponse.data.status !== 'OK' || !detailsResponse.data.result) {
-                console.log(`[GoogleMaps] Could not get details for place_id: ${topResult.place_id}`);
-                return null;
+                await this.rateLimit();
+
+                // Place Details で電話番号を取得
+                const detailsResponse = await axios.get(`${this.baseUrl}/details/json`, {
+                    params: {
+                        place_id: candidate.place_id,
+                        key: this.apiKey,
+                        fields: 'formatted_phone_number,international_phone_number,name,website',
+                        language: 'ja',
+                    },
+                    timeout: 10000,
+                });
+
+                if (detailsResponse.data.status !== 'OK' || !detailsResponse.data.result) {
+                    continue;
+                }
+
+                const details: PlaceDetailsResult = detailsResponse.data.result;
+                const phone = details.formatted_phone_number || details.international_phone_number;
+
+                if (phone) {
+                    console.log(`[GoogleMaps] Found phone: ${phone} for ${details.name}`);
+                    return phone;
+                }
             }
 
-            const details: PlaceDetailsResult = detailsResponse.data.result;
-            const phone = details.formatted_phone_number || details.international_phone_number;
-
-            if (phone) {
-                console.log(`[GoogleMaps] Found phone: ${phone} for ${details.name}`);
-                return phone;
-            }
-
-            console.log(`[GoogleMaps] No phone number found for: ${details.name}`);
+            console.log(`[GoogleMaps] No matching place with phone found for: ${normalizedName}`);
             return null;
 
         } catch (error) {
@@ -231,6 +295,12 @@ export function getGoogleMapsService(): GoogleMapsService | null {
             console.warn('[GoogleMaps] GOOGLE_MAPS_API_KEY not set in environment');
             return null;
         }
+        // Check for placeholder value
+        if (apiKey === 'your_google_maps_api_key_here' || apiKey.startsWith('your_')) {
+            console.warn('[GoogleMaps] GOOGLE_MAPS_API_KEY appears to be a placeholder. Please set a valid API key in .env file.');
+            return null;
+        }
+        console.log('[GoogleMaps] Service initialized with API key');
         instance = new GoogleMapsService(apiKey);
     }
     return instance;

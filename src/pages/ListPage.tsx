@@ -1,70 +1,81 @@
-import { useState, useEffect } from 'react';
-import { Card } from '@/components/ui/card';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select';
-import { ExternalLink, Eye, Phone, Loader2, Download, ChevronDown, ChevronUp } from 'lucide-react';
+    Loader2,
+    Download,
+    ChevronDown,
+    ChevronUp,
+    Trash2,
+    Search,
+    Filter,
+    RefreshCw,
+    Phone,
+    X,
+    RotateCcw,
+} from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import type { Company } from '@/types';
-import { formatCompanyData } from '@/utils/companyFormatter';
+import { cn } from '@/lib/utils';
+import type { FilterTab, SortColumn, SortDirection } from './components/list/constants';
+import { prefectureToRegion } from './components/list/constants';
+import {
+    formatJobPageUpdated,
+    formatLastFetched,
+    parseSalary,
+    parseEmployees,
+} from './components/list/utils';
+import { CompanyFilters } from './components/list/CompanyFilters';
+import { CompanyTable } from './components/list/CompanyTable';
+import { CompanyDetailPanel } from './components/list/CompanyDetailPanel';
+import { DeleteConfirmDialog, UpdateResultsDialog } from './components/list/CompanyDialogs';
 
-// Filter tab options
-type FilterTab = '勤務地' | '職種' | 'こだわり条件' | '雇用形態' | '年収';
+interface ListPageProps {
+    sidebarCollapsed?: boolean;
+}
 
-// Region checkbox options
-const regionCheckboxOptions = [
-    '北海道', '東北', '関東', '甲信越', '北陸',
-    '東海', '関西', '中国', '四国', '九州・沖縄'
-];
+interface ColumnFilterState {
+    industry: string;
+    area: string;
+    salary: string;
+    employees: string;
+    source: string;
+    rank: string;
+    status: string;
+    jobPageUpdated: string;
+    lastFetched: string;
+    jobType: string;
+}
 
-// Job type checkbox options (based on screenshot)
-const jobTypeCheckboxOptions = [
-    '営業・販売',
-    '経営・事業企画・人事・事務',
-    'IT・Web・ゲームエンジニア',
-    'モノづくりエンジニア',
-    'コンサルタント・士業・金融',
-    'サービス・販売・接客',
-    '不動産・建設',
-    '物流・運輸・運転',
-    'その他'
-];
-
-
-// Map prefectures to regions
-const prefectureToRegion: Record<string, string> = {
-    '北海道': '北海道',
-    '青森県': '東北', '岩手県': '東北', '宮城県': '東北', '秋田県': '東北', '山形県': '東北', '福島県': '東北',
-    '茨城県': '関東', '栃木県': '関東', '群馬県': '関東', '埼玉県': '関東', '千葉県': '関東', '東京都': '関東', '神奈川県': '関東',
-    '新潟県': '甲信越', '山梨県': '甲信越', '長野県': '甲信越',
-    '富山県': '北陸', '石川県': '北陸', '福井県': '北陸',
-    '岐阜県': '東海', '静岡県': '東海', '愛知県': '東海', '三重県': '東海',
-    '滋賀県': '関西', '京都府': '関西', '大阪府': '関西', '兵庫県': '関西', '奈良県': '関西', '和歌山県': '関西',
-    '鳥取県': '中国', '島根県': '中国', '岡山県': '中国', '広島県': '中国', '山口県': '中国',
-    '徳島県': '四国', '香川県': '四国', '愛媛県': '四国', '高知県': '四国',
-    '福岡県': '九州・沖縄', '佐賀県': '九州・沖縄', '長崎県': '九州・沖縄', '熊本県': '九州・沖縄',
-    '大分県': '九州・沖縄', '宮崎県': '九州・沖縄', '鹿児島県': '九州・沖縄', '沖縄県': '九州・沖縄',
+const DEFAULT_COLUMN_FILTERS: ColumnFilterState = {
+    industry: 'all',
+    area: 'all',
+    salary: 'all',
+    employees: 'all',
+    source: 'all',
+    rank: 'all',
+    status: 'all',
+    jobPageUpdated: 'all',
+    lastFetched: 'all',
+    jobType: 'all',
 };
 
-export function ListPage() {
-    const { companies, filters, setFilters, fetchCompanies, updateCompany } = useAppStore();
+export function ListPage({ sidebarCollapsed = false }: ListPageProps) {
+    const {
+        companies,
+        filters,
+        setFilters,
+        fetchCompanies,
+        updateCompany,
+        isUpdateRunning,
+        updateProgress,
+        lastUpdateResults,
+        startUpdate,
+        stopUpdate,
+    } = useAppStore();
 
     const [searchQuery, setSearchQuery] = useState(filters.search || '');
-    const [statusFilter, setStatusFilter] = useState(filters.status || 'all');
     const [selectedRegions, setSelectedRegions] = useState<Set<string>>(new Set());
     const [selectedJobTypes, setSelectedJobTypes] = useState<Set<string>>(new Set());
     const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
@@ -72,17 +83,65 @@ export function ListPage() {
     const [isDetailOpen, setIsDetailOpen] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
     const [activeFilterTab, setActiveFilterTab] = useState<FilterTab>('勤務地');
-    const [isFilterExpanded, setIsFilterExpanded] = useState(true);
+    const [isFilterExpanded, setIsFilterExpanded] = useState(false);
+
+    // Refs for click outside detection
+    const detailPanelRef = useRef<HTMLDivElement>(null);
+    const filterPanelRef = useRef<HTMLDivElement>(null);
 
     // Phone enrichment state
     const [isEnriching, setIsEnriching] = useState(false);
     const [enrichProgress, setEnrichProgress] = useState<{ current: number; total: number; companyName: string } | null>(null);
     const [enrichStats, setEnrichStats] = useState<{ withPhone: number; withoutPhone: number } | null>(null);
 
+    // Delete state
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+    // Update results dialog state
+    const [showUpdateResults, setShowUpdateResults] = useState(false);
+
+    // Column filters
+    const [columnFilters, setColumnFilters] = useState<ColumnFilterState>(DEFAULT_COLUMN_FILTERS);
+
+    // Sorting state
+    const [sortColumn, setSortColumn] = useState<SortColumn>(null);
+    const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+
     useEffect(() => {
         fetchCompanies();
         loadEnrichStats();
     }, []);
+
+    // Click outside handler for detail panel
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (isDetailOpen && detailPanelRef.current && !detailPanelRef.current.contains(event.target as Node)) {
+                const target = event.target as HTMLElement;
+                if (!target.closest('[data-detail-trigger]')) {
+                    setIsDetailOpen(false);
+                }
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isDetailOpen]);
+
+    // Click outside handler for filter panel
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (isFilterExpanded && filterPanelRef.current && !filterPanelRef.current.contains(event.target as Node)) {
+                const target = event.target as HTMLElement;
+                if (!target.closest('[data-filter-trigger]')) {
+                    setIsFilterExpanded(false);
+                }
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isFilterExpanded]);
 
     // Load phone enrichment stats
     const loadEnrichStats = async () => {
@@ -97,7 +156,6 @@ export function ListPage() {
         setIsEnriching(true);
         setEnrichProgress(null);
 
-        // Set up progress listener
         window.electronAPI.enrich.onProgress((progress) => {
             setEnrichProgress(progress);
         });
@@ -125,11 +183,10 @@ export function ListPage() {
         const timer = setTimeout(() => {
             setFilters({
                 search: searchQuery || undefined,
-                status: statusFilter !== 'all' ? statusFilter : undefined,
             });
         }, 300);
         return () => clearTimeout(timer);
-    }, [searchQuery, statusFilter]);
+    }, [searchQuery]);
 
     // Handle CSV export
     const handleExport = async () => {
@@ -150,6 +207,39 @@ export function ListPage() {
         } finally {
             setIsExporting(false);
         }
+    };
+
+    // Handle delete selected companies
+    const handleDelete = async () => {
+        if (isDeleting || selectedRows.size === 0) return;
+        setIsDeleting(true);
+
+        try {
+            const ids = Array.from(selectedRows);
+            const result = await window.electronAPI.db.deleteCompanies(ids);
+
+            if (result.success) {
+                setSelectedRows(new Set());
+                fetchCompanies();
+                loadEnrichStats();
+                setShowDeleteConfirm(false);
+            } else {
+                alert(`削除エラー: ${result.error}`);
+            }
+        } catch (error) {
+            alert(`エラー: ${error}`);
+        } finally {
+            setIsDeleting(false);
+        }
+    };
+
+    // Reset all filters
+    const resetAllFilters = () => {
+        setSelectedRegions(new Set());
+        setSelectedJobTypes(new Set());
+        setColumnFilters(DEFAULT_COLUMN_FILTERS);
+        setSortColumn(null);
+        setSortDirection('asc');
     };
 
     // Toggle checkbox selection
@@ -177,50 +267,189 @@ export function ListPage() {
         });
     };
 
-    // Filter companies by region and job type (client-side filtering)
-    const filteredCompanies = companies.filter(company => {
-        // Region filter (if any regions selected)
-        if (selectedRegions.size > 0) {
-            const companyRegion = company.area ? prefectureToRegion[company.area] : null;
-            if (!companyRegion || !selectedRegions.has(companyRegion)) {
-                return false;
-            }
+    // Check if salary matches filter
+    const matchesSalaryFilter = (salaryText: string | null, filter: string): boolean => {
+        if (filter === 'all') return true;
+        const salary = parseSalary(salaryText);
+        switch (filter) {
+            case '300万未満': return salary < 300;
+            case '300-500万': return salary >= 300 && salary < 500;
+            case '500-700万': return salary >= 500 && salary < 700;
+            case '700-1000万': return salary >= 700 && salary < 1000;
+            case '1000万以上': return salary >= 1000;
+            default: return true;
         }
+    };
 
-        // Job type filter (if any job types selected)
-        if (selectedJobTypes.size > 0) {
-            const jobTitle = company.job_title?.toLowerCase() || '';
-            const industry = company.industry?.toLowerCase() || '';
-            const searchText = jobTitle + ' ' + industry;
+    // Check if employees matches filter
+    const matchesEmployeesFilter = (employeesText: string | null, filter: string): boolean => {
+        if (filter === 'all') return true;
+        const employees = parseEmployees(employeesText);
+        switch (filter) {
+            case '10人未満': return employees < 10;
+            case '10-50人': return employees >= 10 && employees < 50;
+            case '50-100人': return employees >= 50 && employees < 100;
+            case '100-500人': return employees >= 100 && employees < 500;
+            case '500人以上': return employees >= 500;
+            default: return true;
+        }
+    };
 
-            const jobTypeKeywords: Record<string, string[]> = {
-                '営業・販売': ['営業', '販売', 'セールス', 'sales'],
-                '経営・事業企画・人事・事務': ['経営', '事業企画', '人事', '事務', '経理', '総務', '管理'],
-                'IT・Web・ゲームエンジニア': ['it', 'web', 'エンジニア', 'プログラマ', 'システム', '開発', 'ゲーム'],
-                'モノづくりエンジニア': ['製造', '工場', '機械', '電気', '電子', '設計', '品質'],
-                'コンサルタント・士業・金融': ['コンサル', '士業', '金融', '銀行', '証券', '保険', '会計'],
-                'サービス・販売・接客': ['サービス', '販売', '接客', '飲食', 'ホテル', '店舗'],
-                '不動産・建設': ['不動産', '建設', '建築', '土木', '施工'],
-                '物流・運輸・運転': ['物流', '運輸', '運転', 'ドライバー', '配送', '倉庫'],
-            };
+    // Check if job page updated matches filter
+    const matchesJobPageUpdatedFilter = (dateStr: string | null, filter: string): boolean => {
+        if (filter === 'all') return true;
+        if (!dateStr) return filter === '14日以上';
+        const { daysAgo } = formatJobPageUpdated(dateStr);
+        switch (filter) {
+            case '3日以内': return daysAgo >= 0 && daysAgo <= 3;
+            case '7日以内': return daysAgo >= 0 && daysAgo <= 7;
+            case '14日以内': return daysAgo >= 0 && daysAgo <= 14;
+            case '14日以上': return daysAgo < 0 || daysAgo > 14;
+            default: return true;
+        }
+    };
 
-            // Check if any of the selected job types match
-            const matchesAnySelected = Array.from(selectedJobTypes).some(selectedType => {
-                const keywords = jobTypeKeywords[selectedType];
-                if (keywords) {
-                    return keywords.some(kw => searchText.includes(kw));
-                } else if (selectedType === 'その他') {
-                    const allKeywords = Object.values(jobTypeKeywords).flat();
-                    return !allKeywords.some(kw => searchText.includes(kw));
+    // Check if last fetched matches filter
+    const matchesLastFetchedFilter = (dateStr: string | null, filter: string): boolean => {
+        if (filter === 'all') return true;
+        if (!dateStr) return filter === '7日以上';
+        const { daysAgo } = formatLastFetched(dateStr);
+        switch (filter) {
+            case '今日': return daysAgo === 0;
+            case '3日以内': return daysAgo >= 0 && daysAgo <= 3;
+            case '7日以内': return daysAgo >= 0 && daysAgo <= 7;
+            case '7日以上': return daysAgo < 0 || daysAgo > 7;
+            default: return true;
+        }
+    };
+
+    // Filter companies
+    const filteredCompanies = useMemo(() => {
+        let result = companies.filter(company => {
+            // Region filter
+            if (selectedRegions.size > 0) {
+                const companyRegion = company.area ? prefectureToRegion[company.area] : null;
+                if (!companyRegion || !selectedRegions.has(companyRegion)) {
+                    return false;
                 }
-                return false;
-            });
+            }
 
-            if (!matchesAnySelected) return false;
+            // Job type filter (from checkbox panel)
+            if (selectedJobTypes.size > 0) {
+                const jobTitle = company.job_title?.toLowerCase() || '';
+                const industry = company.industry?.toLowerCase() || '';
+                const searchText = jobTitle + ' ' + industry;
+
+                const jobTypeKeywords: Record<string, string[]> = {
+                    '営業・販売': ['営業', '販売', 'セールス', 'sales'],
+                    '経営・事業企画・人事・事務': ['経営', '事業企画', '人事', '事務', '経理', '総務', '管理'],
+                    'IT・Web・ゲームエンジニア': ['it', 'web', 'エンジニア', 'プログラマ', 'システム', '開発', 'ゲーム'],
+                    'モノづくりエンジニア': ['製造', '工場', '機械', '電気', '電子', '設計', '品質'],
+                    'コンサルタント・士業・金融': ['コンサル', '士業', '金融', '銀行', '証券', '保険', '会計'],
+                    'サービス・販売・接客': ['サービス', '販売', '接客', '飲食', 'ホテル', '店舗'],
+                    '不動産・建設': ['不動産', '建設', '建築', '土木', '施工'],
+                    '物流・運輸・運転': ['物流', '運輸', '運転', 'ドライバー', '配送', '倉庫'],
+                };
+
+                const matchesAnySelected = Array.from(selectedJobTypes).some(selectedType => {
+                    const keywords = jobTypeKeywords[selectedType];
+                    if (keywords) {
+                        return keywords.some(kw => searchText.includes(kw));
+                    } else if (selectedType === 'その他') {
+                        const allKeywords = Object.values(jobTypeKeywords).flat();
+                        return !allKeywords.some(kw => searchText.includes(kw));
+                    }
+                    return false;
+                });
+
+                if (!matchesAnySelected) return false;
+            }
+
+            // Column filters
+            if (columnFilters.industry !== 'all' && !company.industry?.startsWith(columnFilters.industry)) return false;
+            if (columnFilters.area !== 'all' && company.area !== columnFilters.area) return false;
+            if (columnFilters.source !== 'all' && company.source !== columnFilters.source) return false;
+            if (!matchesSalaryFilter(company.salary_text, columnFilters.salary)) return false;
+            if (!matchesEmployeesFilter(company.employees, columnFilters.employees)) return false;
+            if (columnFilters.rank !== 'all' && company.budget_rank !== columnFilters.rank) return false;
+            if (columnFilters.status !== 'all' && company.status !== columnFilters.status) return false;
+            if (!matchesJobPageUpdatedFilter(company.job_page_updated_at, columnFilters.jobPageUpdated)) return false;
+            if (!matchesLastFetchedFilter(company.last_updated_at || company.created_at, columnFilters.lastFetched)) return false;
+            if (columnFilters.jobType !== 'all' && company.job_type !== columnFilters.jobType) return false;
+
+            return true;
+        });
+
+        // Apply sorting
+        if (sortColumn) {
+            result = [...result].sort((a, b) => {
+                let aVal: string | number = '';
+                let bVal: string | number = '';
+
+                switch (sortColumn) {
+                    case 'industry':
+                        aVal = a.industry || '';
+                        bVal = b.industry || '';
+                        break;
+                    case 'area':
+                        aVal = a.area || '';
+                        bVal = b.area || '';
+                        break;
+                    case 'salary':
+                        aVal = parseSalary(a.salary_text);
+                        bVal = parseSalary(b.salary_text);
+                        break;
+                    case 'employees':
+                        aVal = parseEmployees(a.employees);
+                        bVal = parseEmployees(b.employees);
+                        break;
+                    case 'source':
+                        aVal = a.source || '';
+                        bVal = b.source || '';
+                        break;
+                    case 'jobPageUpdated':
+                        aVal = a.job_page_updated_at ? new Date(a.job_page_updated_at).getTime() : 0;
+                        bVal = b.job_page_updated_at ? new Date(b.job_page_updated_at).getTime() : 0;
+                        break;
+                    case 'lastFetched':
+                        aVal = (a.last_updated_at || a.created_at) ? new Date(a.last_updated_at || a.created_at!).getTime() : 0;
+                        bVal = (b.last_updated_at || b.created_at) ? new Date(b.last_updated_at || b.created_at!).getTime() : 0;
+                        break;
+                    case 'status':
+                        aVal = a.status || '';
+                        bVal = b.status || '';
+                        break;
+                    case 'jobType':
+                        aVal = a.job_type || '';
+                        bVal = b.job_type || '';
+                        break;
+                }
+
+                if (typeof aVal === 'number' && typeof bVal === 'number') {
+                    return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+                }
+                const comparison = String(aVal).localeCompare(String(bVal), 'ja');
+                return sortDirection === 'asc' ? comparison : -comparison;
+            });
         }
 
-        return true;
-    });
+        return result;
+    }, [companies, selectedRegions, selectedJobTypes, columnFilters, sortColumn, sortDirection]);
+
+    // Handle sort column click
+    const handleSort = (column: SortColumn) => {
+        if (sortColumn === column) {
+            if (sortDirection === 'asc') {
+                setSortDirection('desc');
+            } else {
+                setSortColumn(null);
+                setSortDirection('asc');
+            }
+        } else {
+            setSortColumn(column);
+            setSortDirection('asc');
+        }
+    };
 
     const toggleRowSelection = (id: number) => {
         setSelectedRows((prev) => {
@@ -242,30 +471,6 @@ export function ListPage() {
         }
     };
 
-    const getSourceBadge = (source: string) => {
-        const sourceMap: Record<string, { label: string; className: string }> = {
-            mynavi: { label: 'マイナビ', className: 'bg-blue-600 text-white' },
-            rikunabi: { label: 'リクナビ', className: 'bg-green-600 text-white' },
-            doda: { label: 'doda', className: 'bg-orange-500 text-white' },
-        };
-        const config = sourceMap[source] || { label: source, className: 'bg-gray-500 text-white' };
-        return <span className={`px-1.5 py-0.5 rounded text-[10px] ${config.className}`}>{config.label}</span>;
-    };
-
-    const getStatusColor = (status: string) => {
-        const colorMap: Record<string, string> = {
-            new: 'bg-gray-500',
-            unreachable: 'bg-yellow-500',
-            promising: 'bg-blue-500',
-            keyman: 'bg-purple-500',
-            meeting: 'bg-indigo-500',
-            won: 'bg-green-500',
-            lost: 'bg-red-500',
-            ng: 'bg-red-700',
-        };
-        return colorMap[status] || 'bg-gray-500';
-    };
-
     const handleStatusChange = async (id: number, newStatus: string) => {
         await updateCompany(id, { status: newStatus });
         fetchCompanies();
@@ -279,445 +484,286 @@ export function ListPage() {
         }
     };
 
+    const handleUpdateNote = async (id: number, note: string) => {
+        await updateCompany(id, { note });
+    };
+
+    const handleColumnFilterChange = (column: keyof ColumnFilterState, value: string) => {
+        setColumnFilters(prev => ({ ...prev, [column]: value }));
+    };
+
+    const activeFiltersCount = selectedRegions.size + selectedJobTypes.size +
+        Object.values(columnFilters).filter(v => v !== 'all').length;
+
     return (
-        <div className="space-y-4 p-4">
+        <div className="space-y-4">
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-xl font-bold">企業リスト</h1>
-                    <p className="text-sm text-muted-foreground">
-                        {filteredCompanies.length} 件表示 / 全 {companies.length} 件
+                    <h1 className="text-2xl font-bold text-foreground">Company List</h1>
+                    <p className="text-sm text-muted-foreground mt-1">
+                        {filteredCompanies.length}件表示 / 全{companies.length}件
                         {enrichStats && (
-                            <span className="ml-2">
-                                (電話あり: {enrichStats.withPhone} / なし: {enrichStats.withoutPhone})
-                            </span>
-                        )}
-                        {selectedRows.size > 0 && (
-                            <span className="ml-2 text-blue-600">
-                                ({selectedRows.size} 件選択中)
+                            <span className="ml-2 text-xs">
+                                (Phone: <span className="text-green-600 dark:text-green-400">{enrichStats.withPhone}</span> / None: {enrichStats.withoutPhone})
                             </span>
                         )}
                     </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
+                    {/* Delete Button */}
+                    {selectedRows.size > 0 && (
+                        <Button
+                            variant="destructive"
+                            size="sm"
+                            className="rounded-xl"
+                            onClick={() => setShowDeleteConfirm(true)}
+                            disabled={isDeleting}
+                        >
+                            {isDeleting ? (
+                                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                            ) : (
+                                <Trash2 className="h-4 w-4 mr-1.5" />
+                            )}
+                            Delete ({selectedRows.size})
+                        </Button>
+                    )}
                     <Button
                         variant="outline"
                         size="sm"
+                        className="rounded-xl"
                         onClick={handleExport}
                         disabled={isExporting || companies.length === 0}
                     >
                         {isExporting ? (
-                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                            <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
                         ) : (
-                            <Download className="h-4 w-4 mr-1" />
+                            <Download className="h-4 w-4 mr-1.5" />
                         )}
-                        {selectedRows.size > 0 ? `選択をエクスポート (${selectedRows.size})` : 'CSVエクスポート'}
+                        {selectedRows.size > 0 ? `Export (${selectedRows.size})` : 'Export CSV'}
                     </Button>
                     <Button
                         variant="default"
                         size="sm"
+                        className="rounded-xl bg-green-600 hover:bg-green-700"
                         onClick={handlePhoneLookup}
                         disabled={isEnriching || (enrichStats?.withoutPhone === 0)}
-                        className="bg-green-600 hover:bg-green-700"
                     >
                         {isEnriching ? (
                             <>
-                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
                                 {enrichProgress ? `${enrichProgress.current}/${enrichProgress.total}` : '準備中...'}
                             </>
                         ) : (
                             <>
-                                <Phone className="h-4 w-4 mr-1" />
+                                <Phone className="h-4 w-4 mr-1.5" />
                                 電話番号取得
                             </>
                         )}
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => fetchCompanies()}>
-                        更新
-                    </Button>
+                    {/* Update Buttons */}
+                    {selectedRows.size > 0 ? (
+                        <Button
+                            variant="default"
+                            size="sm"
+                            className="rounded-xl bg-blue-600 hover:bg-blue-700"
+                            onClick={() => startUpdate(Array.from(selectedRows)).then((results) => {
+                                if (results && results.length > 0) {
+                                    setShowUpdateResults(true);
+                                }
+                            })}
+                            disabled={isUpdateRunning}
+                        >
+                            {isUpdateRunning ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                                    更新中...
+                                </>
+                            ) : (
+                                <>
+                                    <RefreshCw className="h-4 w-4 mr-1.5" />
+                                    選択更新 ({selectedRows.size})
+                                </>
+                            )}
+                        </Button>
+                    ) : (
+                        <Button
+                            variant="default"
+                            size="sm"
+                            className="rounded-xl bg-blue-600 hover:bg-blue-700"
+                            onClick={() => startUpdate().then((results) => {
+                                if (results && results.length > 0) {
+                                    setShowUpdateResults(true);
+                                }
+                            })}
+                            disabled={isUpdateRunning || companies.length === 0}
+                        >
+                            {isUpdateRunning ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                                    更新中...
+                                </>
+                            ) : (
+                                <>
+                                    <RefreshCw className="h-4 w-4 mr-1.5" />
+                                    全件更新
+                                </>
+                            )}
+                        </Button>
+                    )}
+                    {isUpdateRunning && (
+                        <Button
+                            variant="destructive"
+                            size="sm"
+                            className="rounded-xl"
+                            onClick={stopUpdate}
+                        >
+                            <X className="h-4 w-4 mr-1.5" />
+                            停止
+                        </Button>
+                    )}
                 </div>
             </div>
 
-            {/* Basic Search and Status Filter */}
-            <div className="flex flex-wrap gap-2">
-                <Input
-                    className="flex-1 min-w-[200px] h-8 text-sm"
-                    placeholder="会社名・住所・メモで検索..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                />
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-28 h-8 text-sm">
-                        <SelectValue placeholder="ステータス" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">すべて</SelectItem>
-                        <SelectItem value="new">新規</SelectItem>
-                        <SelectItem value="promising">見込み</SelectItem>
-                        <SelectItem value="meeting">商談中</SelectItem>
-                        <SelectItem value="won">成約</SelectItem>
-                        <SelectItem value="ng">NG</SelectItem>
-                    </SelectContent>
-                </Select>
+            {/* Search and Filter Bar */}
+            <div className="flex items-center gap-3">
+                <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                        className="pl-10 h-11 rounded-xl"
+                        placeholder="会社名・住所・メモで検索..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                </div>
+                {activeFiltersCount > 0 && (
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-11 rounded-xl text-destructive hover:text-destructive"
+                        onClick={resetAllFilters}
+                        title="フィルターをリセット"
+                    >
+                        <RotateCcw className="h-4 w-4 mr-1.5" />
+                        リセット
+                    </Button>
+                )}
                 <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8"
+                    variant={isFilterExpanded ? 'default' : 'outline'}
+                    className={cn(
+                        'h-11 rounded-xl gap-2',
+                        activeFiltersCount > 0 && !isFilterExpanded && 'border-primary text-primary'
+                    )}
                     onClick={() => setIsFilterExpanded(!isFilterExpanded)}
+                    data-filter-trigger
                 >
-                    詳細フィルター
-                    {isFilterExpanded ? <ChevronUp className="ml-1 h-4 w-4" /> : <ChevronDown className="ml-1 h-4 w-4" />}
+                    <Filter className="h-4 w-4" />
+                    フィルター
+                    {activeFiltersCount > 0 && (
+                        <Badge className="ml-1 h-5 w-5 p-0 flex items-center justify-center rounded-full text-xs">
+                            {activeFiltersCount}
+                        </Badge>
+                    )}
+                    {isFilterExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                 </Button>
             </div>
 
-            {/* Expandable Filter Section with Tabs */}
-            {isFilterExpanded && (
-                <Card className="p-4">
-                    {/* Filter Tabs */}
-                    <div className="flex gap-1 mb-4 border-b">
-                        {(['勤務地', '職種'] as FilterTab[]).map(tab => (
-                            <button
-                                key={tab}
-                                className={`px-4 py-2 text-sm font-medium transition-colors ${
-                                    activeFilterTab === tab
-                                        ? 'border-b-2 border-blue-500 text-blue-600'
-                                        : 'text-gray-500 hover:text-gray-700'
-                                }`}
-                                onClick={() => setActiveFilterTab(tab)}
-                            >
-                                {tab}
-                                {tab === '勤務地' && selectedRegions.size > 0 && (
-                                    <span className="ml-1 text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full">
-                                        {selectedRegions.size}
-                                    </span>
-                                )}
-                                {tab === '職種' && selectedJobTypes.size > 0 && (
-                                    <span className="ml-1 text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full">
-                                        {selectedJobTypes.size}
-                                    </span>
-                                )}
-                            </button>
-                        ))}
-                    </div>
-
-                    {/* Filter Content */}
-                    <div className="min-h-[100px]">
-                        {/* 勤務地 Tab */}
-                        {activeFilterTab === '勤務地' && (
-                            <div className="grid grid-cols-5 gap-3">
-                                {regionCheckboxOptions.map(region => (
-                                    <label
-                                        key={region}
-                                        className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded"
-                                    >
-                                        <Checkbox
-                                            checked={selectedRegions.has(region)}
-                                            onCheckedChange={() => toggleRegion(region)}
-                                        />
-                                        <span className="text-sm">{region}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        )}
-
-                        {/* 職種 Tab */}
-                        {activeFilterTab === '職種' && (
-                            <div className="grid grid-cols-3 gap-3">
-                                {jobTypeCheckboxOptions.map(jobType => (
-                                    <label
-                                        key={jobType}
-                                        className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded"
-                                    >
-                                        <Checkbox
-                                            checked={selectedJobTypes.has(jobType)}
-                                            onCheckedChange={() => toggleJobType(jobType)}
-                                        />
-                                        <span className="text-sm">{jobType}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Clear Filters Button */}
-                    {(selectedRegions.size > 0 || selectedJobTypes.size > 0) && (
-                        <div className="mt-4 pt-3 border-t flex justify-end">
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => {
-                                    setSelectedRegions(new Set());
-                                    setSelectedJobTypes(new Set());
-                                }}
-                            >
-                                フィルターをクリア
-                            </Button>
-                        </div>
-                    )}
-                </Card>
+            {/* Selection Bar */}
+            {selectedRows.size > 0 && (
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-primary/5 border border-primary/20">
+                    <span className="text-sm font-medium text-primary">
+                        {selectedRows.size} 件選択中
+                    </span>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs"
+                        onClick={() => setSelectedRows(new Set())}
+                    >
+                        選択解除
+                    </Button>
+                </div>
             )}
 
-            {/* Compact Table */}
-            <Card className="overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                        <thead className="bg-muted/50 border-b">
-                            <tr>
-                                <th className="p-2 w-8">
-                                    <Checkbox
-                                        checked={selectedRows.size === filteredCompanies.length && filteredCompanies.length > 0}
-                                        onCheckedChange={toggleAllSelection}
-                                    />
-                                </th>
-                                <th className="p-2 text-left font-medium w-[160px]">会社名</th>
-                                <th className="p-2 text-left font-medium w-[40px]">詳細</th>
-                                <th className="p-2 text-left font-medium w-[100px]">電話番号</th>
-                                <th className="p-2 text-left font-medium w-[80px]">会社HP</th>
-                                <th className="p-2 text-left font-medium w-[100px]">業種</th>
-                                <th className="p-2 text-left font-medium w-[60px]">エリア</th>
-                                <th className="p-2 text-left font-medium w-[90px]">給与</th>
-                                <th className="p-2 text-left font-medium w-[70px]">規模</th>
-                                <th className="p-2 text-left font-medium w-[50px]">ソース</th>
-                                <th className="p-2 text-left font-medium w-[70px]">ステータス</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                            {filteredCompanies.map((company) => {
-                                const formatted = formatCompanyData(company);
-
-                                return (
-                                    <tr
-                                        key={company.id}
-                                        className="hover:bg-muted/30 h-9"
-                                    >
-                                        {/* Checkbox */}
-                                        <td className="p-2">
-                                            <Checkbox
-                                                checked={selectedRows.has(company.id)}
-                                                onCheckedChange={() => toggleRowSelection(company.id)}
-                                            />
-                                        </td>
-
-                                        {/* 会社名 */}
-                                        <td className="p-2">
-                                            <a
-                                                href={company.url}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="text-blue-600 hover:text-blue-800 dark:text-blue-400 truncate max-w-[140px] font-medium block"
-                                                title={formatted.fullCompanyName}
-                                            >
-                                                {formatted.companyName}
-                                            </a>
-                                        </td>
-
-                                        {/* 詳細ボタン */}
-                                        <td className="p-2">
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-6 w-6 p-0"
-                                                onClick={() => handleViewDetail(company)}
-                                                title="詳細"
-                                            >
-                                                <Eye className="h-3 w-3" />
-                                            </Button>
-                                        </td>
-
-                                        {/* 電話番号 */}
-                                        <td className="p-2">
-                                            {company.phone ? (
-                                                <span
-                                                    className="text-blue-600 cursor-pointer hover:underline truncate block max-w-[90px]"
-                                                    onClick={() => navigator.clipboard.writeText(company.phone!)}
-                                                    title={`${company.phone} (クリックでコピー)`}
-                                                >
-                                                    {company.phone}
-                                                </span>
-                                            ) : (
-                                                <span className="text-muted-foreground">-</span>
-                                            )}
-                                        </td>
-
-                                        {/* 会社HP */}
-                                        <td className="p-2">
-                                            {company.homepage_url ? (
-                                                <a
-                                                    href={company.homepage_url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                                                    title={company.homepage_url}
-                                                >
-                                                    <ExternalLink className="h-3 w-3" />
-                                                    <span className="text-xs">HP</span>
-                                                </a>
-                                            ) : (
-                                                <span className="text-muted-foreground">-</span>
-                                            )}
-                                        </td>
-
-                                        {/* 業種 */}
-                                        <td className="p-2">
-                                            <span
-                                                className="text-muted-foreground truncate block max-w-[90px]"
-                                                title={formatted.fullIndustry}
-                                            >
-                                                {formatted.industry}
-                                            </span>
-                                        </td>
-
-                                        {/* エリア */}
-                                        <td className="p-2">
-                                            <span className="text-muted-foreground truncate block max-w-[50px]">
-                                                {formatted.area}
-                                            </span>
-                                        </td>
-
-                                        {/* 給与 */}
-                                        <td className="p-2">
-                                            <span
-                                                className="text-green-600 dark:text-green-400 truncate block max-w-[80px]"
-                                                title={formatted.fullSalary}
-                                            >
-                                                {formatted.salary}
-                                            </span>
-                                        </td>
-
-                                        {/* 規模 */}
-                                        <td className="p-2">
-                                            <span
-                                                className="text-muted-foreground truncate block max-w-[60px]"
-                                                title={formatted.fullScale}
-                                            >
-                                                {formatted.scale}
-                                            </span>
-                                        </td>
-
-                                        {/* ソース */}
-                                        <td className="p-2">
-                                            {getSourceBadge(company.source)}
-                                        </td>
-
-                                        {/* ステータス */}
-                                        <td className="p-2">
-                                            <Select
-                                                value={company.status}
-                                                onValueChange={(value) => handleStatusChange(company.id, value)}
-                                            >
-                                                <SelectTrigger className={`h-6 w-16 text-[10px] text-white border-0 ${getStatusColor(company.status)}`}>
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="new">新規</SelectItem>
-                                                    <SelectItem value="promising">見込み</SelectItem>
-                                                    <SelectItem value="meeting">商談中</SelectItem>
-                                                    <SelectItem value="won">成約</SelectItem>
-                                                    <SelectItem value="ng">NG</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
+            {/* Update Progress Bar */}
+            {isUpdateRunning && updateProgress && (
+                <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800">
+                    <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                            更新中: {updateProgress.companyName}
+                        </span>
+                        <span className="text-sm text-blue-600 dark:text-blue-400">
+                            {updateProgress.current}/{updateProgress.total} 件
+                        </span>
+                    </div>
+                    <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-2.5">
+                        <div
+                            className="bg-blue-600 dark:bg-blue-400 h-2.5 rounded-full transition-all duration-300"
+                            style={{ width: `${(updateProgress.current / updateProgress.total) * 100}%` }}
+                        />
+                    </div>
+                    <p className="text-xs text-blue-500 dark:text-blue-400 mt-1">
+                        {updateProgress.status}
+                    </p>
                 </div>
+            )}
 
-                {companies.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground text-sm">
-                        データがありません。検索ページからスクレイピングを開始してください。
-                    </div>
-                ) : filteredCompanies.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground text-sm">
-                        条件に一致するデータがありません。フィルターを変更してください。
-                    </div>
-                ) : null}
-            </Card>
+            {/* Expandable Filter Section */}
+            {isFilterExpanded && (
+                <CompanyFilters
+                    activeFilterTab={activeFilterTab}
+                    setActiveFilterTab={setActiveFilterTab}
+                    selectedRegions={selectedRegions}
+                    toggleRegion={toggleRegion}
+                    selectedJobTypes={selectedJobTypes}
+                    toggleJobType={toggleJobType}
+                    activeFiltersCount={activeFiltersCount}
+                    resetAllFilters={resetAllFilters}
+                    filterPanelRef={filterPanelRef}
+                />
+            )}
 
-            {/* Detail Modal */}
-            <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
-                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-                    <DialogHeader>
-                        <DialogTitle>{detailCompany?.company_name}</DialogTitle>
-                        <DialogDescription>
-                            {detailCompany && getSourceBadge(detailCompany.source)} からスクレイピング
-                        </DialogDescription>
-                    </DialogHeader>
+            {/* Data Table */}
+            <CompanyTable
+                companies={companies}
+                filteredCompanies={filteredCompanies}
+                selectedRows={selectedRows}
+                sortColumn={sortColumn}
+                sortDirection={sortDirection}
+                columnFilters={columnFilters}
+                onToggleRow={toggleRowSelection}
+                onToggleAll={toggleAllSelection}
+                onSort={handleSort}
+                onColumnFilterChange={handleColumnFilterChange}
+                onViewDetail={handleViewDetail}
+                onStatusChange={handleStatusChange}
+            />
 
-                    {detailCompany && (
-                        <div className="space-y-4 pt-4 text-sm">
-                            {/* 基本情報 */}
-                            <section>
-                                <h4 className="font-semibold mb-2 border-b pb-1">基本情報</h4>
-                                <dl className="grid grid-cols-2 gap-2">
-                                    <dt className="text-muted-foreground">代表者</dt>
-                                    <dd>{detailCompany.representative || '-'}</dd>
-                                    <dt className="text-muted-foreground">設立</dt>
-                                    <dd>{detailCompany.establishment || '-'}</dd>
-                                    <dt className="text-muted-foreground">従業員数</dt>
-                                    <dd>{detailCompany.employees || '-'}</dd>
-                                    <dt className="text-muted-foreground">売上高</dt>
-                                    <dd>{detailCompany.revenue || '-'}</dd>
-                                    <dt className="text-muted-foreground">所在地</dt>
-                                    <dd className="col-span-1">{detailCompany.address || '-'}</dd>
-                                </dl>
-                            </section>
+            {/* Delete Confirmation Dialog */}
+            <DeleteConfirmDialog
+                isOpen={showDeleteConfirm}
+                onClose={() => setShowDeleteConfirm(false)}
+                selectedCount={selectedRows.size}
+                isDeleting={isDeleting}
+                onDelete={handleDelete}
+            />
 
-                            {/* 事業内容 */}
-                            <section>
-                                <h4 className="font-semibold mb-2 border-b pb-1">事業内容</h4>
-                                <p className="whitespace-pre-wrap">{detailCompany.industry || '-'}</p>
-                            </section>
+            {/* Update Results Dialog */}
+            <UpdateResultsDialog
+                isOpen={showUpdateResults}
+                onClose={() => setShowUpdateResults(false)}
+                results={lastUpdateResults}
+            />
 
-                            {/* 採用情報 */}
-                            <section>
-                                <h4 className="font-semibold mb-2 border-b pb-1">採用情報</h4>
-                                <dl className="grid grid-cols-2 gap-2">
-                                    <dt className="text-muted-foreground">職種</dt>
-                                    <dd>{detailCompany.job_title || '-'}</dd>
-                                    <dt className="text-muted-foreground">給与</dt>
-                                    <dd className="whitespace-pre-wrap">{detailCompany.salary_text || '-'}</dd>
-                                </dl>
-                            </section>
-
-                            {/* リンク */}
-                            <section>
-                                <h4 className="font-semibold mb-2 border-b pb-1">リンク</h4>
-                                <div className="flex flex-wrap gap-2">
-                                    <Button variant="outline" size="sm" onClick={() => window.open(detailCompany.url, '_blank')}>
-                                        <ExternalLink className="h-3 w-3 mr-1" />
-                                        求人ページ
-                                    </Button>
-                                    {detailCompany.homepage_url && (
-                                        <Button variant="outline" size="sm" onClick={() => window.open(detailCompany.homepage_url!, '_blank')}>
-                                            <ExternalLink className="h-3 w-3 mr-1" />
-                                            企業HP
-                                        </Button>
-                                    )}
-                                    {detailCompany.contact_form_url && (
-                                        <Button variant="outline" size="sm" onClick={() => window.open(detailCompany.contact_form_url!, '_blank')}>
-                                            <ExternalLink className="h-3 w-3 mr-1" />
-                                            問い合わせ
-                                        </Button>
-                                    )}
-                                </div>
-                            </section>
-
-                            {/* メモ */}
-                            <section>
-                                <h4 className="font-semibold mb-2 border-b pb-1">メモ</h4>
-                                <textarea
-                                    className="w-full p-2 border rounded text-sm min-h-[80px]"
-                                    placeholder="メモを入力..."
-                                    defaultValue={detailCompany.note || ''}
-                                    onBlur={(e) => updateCompany(detailCompany.id, { note: e.target.value })}
-                                />
-                            </section>
-                        </div>
-                    )}
-                </DialogContent>
-            </Dialog>
+            {/* Detail Slide Panel */}
+            <CompanyDetailPanel
+                isOpen={isDetailOpen}
+                company={detailCompany}
+                sidebarCollapsed={sidebarCollapsed}
+                onClose={() => setIsDetailOpen(false)}
+                onUpdateNote={handleUpdateNote}
+                panelRef={detailPanelRef}
+            />
         </div>
     );
 }
