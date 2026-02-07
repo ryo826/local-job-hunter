@@ -38,7 +38,7 @@ export function JobTypeModal({
                         職種を選択
                     </DialogTitle>
                 </DialogHeader>
-                <div className="mt-4">
+                <div className="mt-4 overflow-y-auto max-h-[55vh]">
                     <div className="grid grid-cols-2 gap-3">
                         {categories.map(category => (
                             <label
