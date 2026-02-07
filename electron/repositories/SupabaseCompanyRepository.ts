@@ -203,6 +203,24 @@ export class SupabaseCompanyRepository {
         return count ?? ids.length;
     }
 
+    async getDistinctAreas(): Promise<string[]> {
+        const { data, error } = await supabase
+            .from('companies')
+            .select('area');
+        if (error || !data) return [];
+        const areas = [...new Set(data.map(r => r.area).filter(Boolean))] as string[];
+        return areas.sort();
+    }
+
+    async getDistinctJobTitles(): Promise<string[]> {
+        const { data, error } = await supabase
+            .from('companies')
+            .select('job_title');
+        if (error || !data) return [];
+        const titles = [...new Set(data.map(r => r.job_title).filter(Boolean))] as string[];
+        return titles.sort();
+    }
+
     async deleteAll(): Promise<number> {
         // Delete all by matching all rows
         const { error, count } = await supabase
